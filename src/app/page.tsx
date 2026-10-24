@@ -124,7 +124,7 @@ export default function AppCampo() {
           <p className="mt-6 rounded-xl bg-fundo p-6 text-center text-suave">Escolha a TAG do cabo para preencher.</p>
         ) : (
           <Preenchimento
-            key={`${cabo.id}-${cabo.atualizado_em}`}
+            key={cabo.id}
             cabo={cabo}
             pendente={pendPorCabo.get(cabo.id)}
             sugestoesCabo={[...new Set(cabos.map((c) => c.cabo_estimado).filter(Boolean) as string[])].sort()}
@@ -171,11 +171,18 @@ function Preenchimento({ cabo, pendente, sugestoesCabo }: { cabo: Cabo; pendente
       return;
     }
     setSalvando(true);
+    setMsg(null);
     const r = await salvarExecucao(cabo, exec);
     setSalvando(false);
-    if (r.estado === "enviado") setMsg({ tipo: "ok", texto: "Preenchimento salvo." });
-    else if (r.estado === "pendente") setMsg({ tipo: "alerta", texto: "Sem internet: salvo no celular, será enviado quando a conexão voltar." });
-    else setMsg({ tipo: "erro", texto: r.mensagem ?? "Não foi possível salvar." });
+    const hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    if (r.estado === "enviado") {
+      setMsg({ tipo: "ok", texto: `Enviado ✓ — ${cabo.tag} atualizado às ${hora} (status ${calcularStatus(exec)}).` });
+      setTimeout(() => setMsg((m) => (m?.tipo === "ok" ? null : m)), 6000);
+    } else if (r.estado === "pendente") {
+      setMsg({ tipo: "alerta", texto: "Sem internet: salvo no celular, será enviado quando a conexão voltar." });
+    } else {
+      setMsg({ tipo: "erro", texto: r.mensagem ?? "Não foi possível salvar." });
+    }
   }
 
   return (
@@ -240,11 +247,15 @@ function Preenchimento({ cabo, pendente, sugestoesCabo }: { cabo: Cabo; pendente
           <p className="text-suave">Você pode salvar com campos em branco.</p>
         </div>
       </section>
-      {msg && <div className="mt-4"><Aviso tipo={msg.tipo}>{msg.texto}</Aviso></div>}
-
       <div className="fixed inset-x-0 bottom-0 z-20 bg-gradient-to-t from-white via-white to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
+        {/* Aviso logo acima do botão, para não ficar escondido atrás dele */}
+        {msg && (
+          <div role="status" aria-live="polite" className="mx-auto mb-2 max-w-xl shadow-lg">
+            <Aviso tipo={msg.tipo}>{msg.texto}</Aviso>
+          </div>
+        )}
         <button onClick={salvar} disabled={salvando} className="mx-auto block w-full max-w-xl gradiente-marca rounded-xl py-4 text-lg font-semibold text-white shadow-md transition hover:brightness-95 disabled:opacity-60">
-          {salvando ? "Salvando…" : "Salvar preenchimento"}
+          {salvando ? "Enviando…" : msg?.tipo === "ok" ? "Enviado ✓" : "Salvar preenchimento"}
         </button>
       </div>
     </>
