@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* Design system — baseado na logo Sonn Tech (verde → teal) */
+@theme {
+  --font-sans: var(--font-inter), system-ui, sans-serif;
+
+  --color-marinho: #0f2a47;
+  --color-marinho-claro: #1b3d63;
+  --color-teal: #1f9598;
+  --color-teal-escuro: #17787a;
+  --color-teal-claro: #e3f3f3;
+  --color-verde: #8dc63f;
+  --color-verde-claro: #eef7e2;
+
+  --color-fundo: #f3f5f8;
+  --color-cartao: #ffffff;
+  --color-borda: #d9dee5;
+  --color-texto: #12233a;
+  --color-suave: #6b7686;
+
+  --color-ni: #8a929d;
+  --color-ni-fundo: #eceef1;
+  --color-p: #d48a12;
+  --color-p-fundo: #fdf1dc;
+  --color-t: #2e9b48;
+  --color-t-fundo: #e2f4e6;
+  --color-erro: #c8372d;
+  --color-erro-fundo: #fbe6e4;
+}
+
+html,
+body {
+  background: var(--color-fundo);
+  color: var(--color-texto);
+}
+
+.gradiente-marca {
+  background-image: linear-gradient(135deg, var(--color-verde), var(--color-teal));
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0.6;
+}
