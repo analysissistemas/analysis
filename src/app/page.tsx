@@ -10,12 +10,6 @@ import { sair, useSessao } from "@/lib/sessao";
 import { calcularStatus, formatarMetros, type Cabo, type Execucao, type Status } from "@/lib/tipos";
 
 const ORDEM_STATUS: Record<Status, number> = { NI: 0, P: 1, T: 2 };
-const FILTROS_STATUS: [Status | "", string][] = [
-  ["", "Todos"],
-  ["NI", "Falta"],
-  ["P", "Parcial"],
-  ["T", "Terminado"],
-];
 
 export default function AppCampo() {
   const { perfil, carregando } = useSessao();
@@ -25,7 +19,6 @@ export default function AppCampo() {
   const online = useOnline();
   const [disciplina, setDisciplina] = useState("");
   const [pavimento, setPavimento] = useState("");
-  const [status, setStatus] = useState<Status | "">("");
   const [busca, setBusca] = useState("");
   const [caboId, setCaboId] = useState<number | null>(null);
   const [menu, setMenu] = useState(false);
@@ -102,11 +95,9 @@ export default function AppCampo() {
     [cabos, disciplina],
   );
   const daArea = cabos.filter((c) => (!disciplina || c.disciplina === disciplina) && (!pavimento || c.pavimento === pavimento));
-  const contagem = { NI: 0, P: 0, T: 0 };
-  daArea.forEach((c) => contagem[statusDe(c)]++);
   const termo = busca.trim().toLowerCase();
   const visiveis = daArea
-    .filter((c) => (!status || statusDe(c) === status) && (!termo || `${c.tag} ${c.de ?? ""} ${c.para ?? ""}`.toLowerCase().includes(termo)))
+    .filter((c) => !termo || `${c.tag} ${c.de ?? ""} ${c.para ?? ""}`.toLowerCase().includes(termo))
     .sort((a, b) => ORDEM_STATUS[statusDe(a)] - ORDEM_STATUS[statusDe(b)] || a.tag.localeCompare(b.tag));
 
   const cabo = caboId != null ? cabos.find((c) => c.id === caboId) : undefined;
@@ -130,9 +121,6 @@ export default function AppCampo() {
       </>
     );
   }
-
-  const total = daArea.length;
-  const faltam = contagem.NI + contagem.P;
 
   return (
     <div className="flex min-h-dvh flex-col">
@@ -183,39 +171,6 @@ export default function AppCampo() {
           </Campo>
         </div>
 
-        {/* Resumo do que falta — mesma leitura da visão do admin */}
-        {total > 0 && (
-          <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-borda">
-            <div className="flex items-baseline justify-between gap-2">
-              <p className="text-lg font-bold text-grafite">
-                {faltam === 0 ? "Tudo terminado ✓" : `Faltam ${faltam} de ${total} cabos`}
-              </p>
-              <p className="text-sm text-suave">{Math.round((contagem.T / total) * 100)}% concluído</p>
-            </div>
-            <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-st-ni-fundo">
-              <div className="bg-st-t" style={{ width: `${(contagem.T / total) * 100}%` }} />
-              <div className="bg-st-p" style={{ width: `${(contagem.P / total) * 100}%` }} />
-            </div>
-            <div className="mt-3 grid grid-cols-4 gap-1.5">
-              {FILTROS_STATUS.map(([v, r]) => {
-                const n = v ? contagem[v] : total;
-                const ativo = status === v;
-                return (
-                  <button
-                    key={v || "todos"}
-                    onClick={() => setStatus(v)}
-                    aria-pressed={ativo}
-                    className={`rounded-xl px-1 py-2 text-center transition ${ativo ? "bg-teal text-white shadow-sm" : "bg-fundo text-texto hover:bg-teal-claro"}`}
-                  >
-                    <span className="block text-lg leading-none font-bold">{n}</span>
-                    <span className="mt-1 block text-xs font-medium">{r}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-        )}
-
         <input
           type="search"
           placeholder="Buscar por TAG, DE ou PARA"
@@ -234,9 +189,9 @@ export default function AppCampo() {
           </p>
         ) : visiveis.length === 0 ? (
           <div className="rounded-xl bg-white p-6 text-center text-suave ring-1 ring-borda">
-            Nenhum cabo com esses filtros.
-            <button onClick={() => { setStatus(""); setBusca(""); }} className="mt-2 block w-full font-semibold text-teal">
-              Limpar filtros
+            Nenhum cabo encontrado.
+            <button onClick={() => setBusca("")} className="mt-2 block w-full font-semibold text-teal">
+              Limpar busca
             </button>
           </div>
         ) : (
