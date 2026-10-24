@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Aviso, Cabecalho, Campo, SeloStatus, Selecao, classeInput } from "@/components/ui";
+import { Aviso, AvisoNoTopo, Cabecalho, Campo, SeloStatus, Selecao, classeInput, useAvisoFlutuante, type TipoAviso } from "@/components/ui";
 import { exportarPdf } from "@/lib/pdf";
 import { agrupar, exportarExcel, lerPlanilha, resumo, type ResultadoLeitura } from "@/lib/planilha";
 import { baixarCabos } from "@/lib/offline";
@@ -25,6 +25,7 @@ export default function Admin() {
   const [aba, setAba] = useState<Aba>("painel");
   const [cabos, setCabos] = useState<Cabo[]>([]);
   const [erro, setErro] = useState("");
+  const { aviso, mostrar, fechar } = useAvisoFlutuante();
 
   const recarregar = useCallback(
     () =>
@@ -77,10 +78,11 @@ export default function Admin() {
       <main className={`mx-auto w-full flex-1 px-4 py-6 ${aba === "cabos" ? "max-w-[1800px]" : "max-w-6xl"}`}>
         {erro && <div className="mb-4"><Aviso tipo="erro">{erro}</Aviso></div>}
         {aba === "painel" && <Painel cabos={cabos} />}
-        {aba === "cabos" && <TabelaCabos cabos={cabos} recarregar={recarregar} />}
+        {aba === "cabos" && <TabelaCabos cabos={cabos} recarregar={recarregar} mostrar={mostrar} />}
         {aba === "importar" && <Importar recarregar={recarregar} irParaCabos={() => setAba("cabos")} />}
-        {aba === "usuarios" && <Usuarios meuId={perfil.id} />}
+        {aba === "usuarios" && <Usuarios meuId={perfil.id} mostrar={mostrar} />}
       </main>
+      <AvisoNoTopo aviso={aviso} fechar={fechar} />
     </div>
   );
 }
@@ -157,13 +159,16 @@ function Painel({ cabos }: { cabos: Cabo[] }) {
   );
 }
 
-function TabelaCabos({ cabos, recarregar }: { cabos: Cabo[]; recarregar: () => Promise<void> }) {
+type Mostrar = (tipo: TipoAviso, texto: string) => void;
+
+function TabelaCabos({ cabos, recarregar, mostrar }: { cabos: Cabo[]; recarregar: () => Promise<void>; mostrar: Mostrar }) {
   const [disciplina, setDisciplina] = useState("");
   const [pavimento, setPavimento] = useState("");
   const [status, setStatus] = useState("");
   const [busca, setBusca] = useState("");
   const [exportando, setExportando] = useState<"" | "pdf" | "xlsx">("");
-  const [excluir, setExcluir] = useState<Cabo | null>(null);
+  const [aberto, setAberto] = useState<Cabo | null>(null);
+  const [atualizando, setAtualizando] = useState(false);
 
   const disciplinas = useMemo(() => [...new Set(cabos.map((c) => c.disciplina).filter(Boolean) as string[])].sort(), [cabos]);
   const pavimentos = useMemo(() => [...new Set(cabos.map((c) => c.pavimento).filter(Boolean) as string[])].sort(), [cabos]);
@@ -182,16 +187,19 @@ function TabelaCabos({ cabos, recarregar }: { cabos: Cabo[]; recarregar: () => P
     try {
       if (tipo === "pdf") await exportarPdf(filtrados, descricaoFiltros);
       else await exportarExcel(filtrados, descricaoFiltros);
+      mostrar("ok", `${tipo === "pdf" ? "PDF" : "Excel"} gerado ✓ — ${filtrados.length} cabos. Veja na pasta de downloads.`);
+    } catch {
+      mostrar("erro", `Não foi possível gerar o ${tipo === "pdf" ? "PDF" : "Excel"}. Tente de novo.`);
     } finally {
       setExportando("");
     }
   }
 
-  async function confirmarExclusao() {
-    if (!excluir) return;
-    await supabase.rpc("excluir_cabo", { p_cabo_id: excluir.id });
-    setExcluir(null);
-    recarregar();
+  async function atualizarLista() {
+    setAtualizando(true);
+    await recarregar();
+    setAtualizando(false);
+    mostrar("ok", `Lista atualizada ✓ — ${new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`);
   }
 
   return (
@@ -203,7 +211,12 @@ function TabelaCabos({ cabos, recarregar }: { cabos: Cabo[]; recarregar: () => P
         <Campo rotulo="Buscar"><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="TAG, DE ou PARA" className={classeInput} /></Campo>
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
-        <p className="mr-auto text-sm text-suave">{filtrados.length} de {cabos.length} cabos</p>
+        <p className="mr-auto flex items-center gap-2 text-sm text-suave">
+          {filtrados.length} de {cabos.length} cabos
+          <button onClick={atualizarLista} disabled={atualizando} className="rounded-lg px-2 py-1 font-semibold text-teal hover:bg-teal-claro disabled:opacity-60">
+            {atualizando ? "Atualizando…" : "↻ Atualizar"}
+          </button>
+        </p>
         <button onClick={() => exportar("xlsx")} disabled={!!exportando || !filtrados.length} className="flex h-11 items-center gap-2 rounded-lg bg-white px-4 font-semibold text-st-t ring-1 ring-borda hover:bg-st-t-fundo disabled:opacity-50">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z" /><path d="M8 13l4 5M12 13l-4 5" /></svg>
           {exportando === "xlsx" ? "Gerando…" : "Exportar Excel"}
@@ -214,62 +227,192 @@ function TabelaCabos({ cabos, recarregar }: { cabos: Cabo[]; recarregar: () => P
         </button>
       </div>
 
-      {/* TAG fixa à esquerda e Status fixo à direita: continuam visíveis ao rolar para o lado */}
+      {/* No celular: TAG, DE, PARA e Status. No computador: todas as colunas. Toque na linha para abrir o cabo. */}
       <div className="mt-4 max-h-[calc(100dvh-16rem)] overflow-auto rounded-xl bg-white ring-1 ring-borda">
         <table className="w-full border-separate border-spacing-0 text-[13px]">
           <thead className="sticky top-0 z-20 text-left text-[11px] uppercase tracking-wide text-white">
             <tr>
-              {["TAG", "Disciplina", "Pavimento", "Cabo est.", "DE", "PARA", "m est.", "Corte", "m cort.", "Cabo cortado", "Lançamento", "Status"].map((h, i) => (
-                <th
-                  key={h}
-                  className={`bg-grafite px-2.5 py-2.5 font-semibold whitespace-nowrap ${i === 0 ? "sticky left-0 z-10" : ""} ${i === 11 ? "sticky right-0 z-10" : ""} ${[6, 8].includes(i) ? "text-right" : ""}`}
-                >
-                  {h}
-                </th>
+              <th className="sticky left-0 z-10 bg-grafite px-2.5 py-2.5 font-semibold whitespace-nowrap">TAG</th>
+              <th className="bg-grafite px-2.5 py-2.5 font-semibold">DE</th>
+              <th className="bg-grafite px-2.5 py-2.5 font-semibold">PARA</th>
+              {["Disciplina", "Pavimento", "Cabo est.", "m est.", "Corte", "m cort.", "Cabo cortado", "Lançamento"].map((h) => (
+                <th key={h} className={`hidden bg-grafite px-2.5 py-2.5 font-semibold whitespace-nowrap md:table-cell ${h.startsWith("m ") ? "text-right" : ""}`}>{h}</th>
               ))}
+              <th className="sticky right-0 z-10 bg-grafite px-2.5 py-2.5 font-semibold">Status</th>
             </tr>
           </thead>
           <tbody>
-            {filtrados.map((c) => (
-              <tr key={c.id} className="group">
-                <td className="sticky left-0 z-10 border-t border-r border-borda bg-white px-2.5 py-2 font-bold whitespace-nowrap text-grafite group-hover:bg-fundo">{c.tag}</td>
-                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.disciplina}</td>
-                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.pavimento}</td>
-                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.cabo_estimado}</td>
-                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap text-suave group-hover:bg-fundo">{c.de}</td>
-                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap text-suave group-hover:bg-fundo">{c.para}</td>
-                <td className="border-t border-borda px-2.5 py-2 text-right group-hover:bg-fundo">{c.metragem_estimada ?? ""}</td>
-                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.data_corte ? formatarData(c.data_corte) : ""}</td>
-                <td className={`border-t border-borda px-2.5 py-2 text-right group-hover:bg-fundo ${c.metragem_cortada != null && c.metragem_estimada != null && c.metragem_cortada > c.metragem_estimada ? "font-bold text-st-p" : ""}`}>{c.metragem_cortada ?? ""}</td>
-                <td className={`border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo ${c.cabo_cortado && c.cabo_estimado && c.cabo_cortado !== c.cabo_estimado ? "font-bold text-st-p" : ""}`}>{c.cabo_cortado}</td>
-                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.data_lancamento ? formatarData(c.data_lancamento) : ""}</td>
-                <td className="sticky right-0 z-10 border-t border-l border-borda bg-white px-2.5 py-1.5 group-hover:bg-fundo">
-                  <div className="flex items-center justify-between gap-2">
-                    <SeloStatus status={c.status as Status} curto />
-                    <button onClick={() => setExcluir(c)} aria-label={`Excluir ${c.tag}`} title="Excluir cabo" className="rounded p-1 text-suave hover:bg-erro-fundo hover:text-erro">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+            {filtrados.map((c) => {
+              const td = "border-t border-borda px-2.5 py-2 group-hover:bg-teal-claro";
+              const so = `hidden md:table-cell whitespace-nowrap ${td}`;
+              return (
+                <tr
+                  key={c.id}
+                  onClick={() => setAberto(c)}
+                  onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && setAberto(c)}
+                  tabIndex={0}
+                  title={`Abrir ${c.tag}`}
+                  className="group cursor-pointer outline-none focus-visible:ring-2 focus-visible:ring-teal"
+                >
+                  <td className={`sticky left-0 z-10 border-r bg-white font-bold whitespace-nowrap text-grafite ${td}`}>{c.tag}</td>
+                  <td className={`min-w-[8.5rem] break-words text-texto md:whitespace-nowrap ${td}`}>{c.de}</td>
+                  <td className={`min-w-[8.5rem] break-words text-texto md:whitespace-nowrap ${td}`}>{c.para}</td>
+                  <td className={so}>{c.disciplina}</td>
+                  <td className={so}>{c.pavimento}</td>
+                  <td className={so}>{c.cabo_estimado}</td>
+                  <td className={`${so} text-right`}>{c.metragem_estimada ?? ""}</td>
+                  <td className={so}>{c.data_corte ? formatarData(c.data_corte) : ""}</td>
+                  <td className={`${so} text-right ${c.metragem_cortada != null && c.metragem_estimada != null && c.metragem_cortada > c.metragem_estimada ? "font-bold text-st-p" : ""}`}>{c.metragem_cortada ?? ""}</td>
+                  <td className={`${so} ${c.cabo_cortado && c.cabo_estimado && c.cabo_cortado !== c.cabo_estimado ? "font-bold text-st-p" : ""}`}>{c.cabo_cortado}</td>
+                  <td className={so}>{c.data_lancamento ? formatarData(c.data_lancamento) : ""}</td>
+                  <td className={`sticky right-0 z-10 border-l bg-white ${td}`}>
+                    <div className="flex items-center justify-between gap-1">
+                      <SeloStatus status={c.status as Status} curto />
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-suave"><path d="M9 6l6 6-6 6" /></svg>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         {!filtrados.length && <p className="p-6 text-center text-suave">Nenhum cabo encontrado.</p>}
       </div>
 
-      {excluir && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4">
-          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
-            <h3 className="text-lg font-bold">Excluir {excluir.tag}?</h3>
-            <p className="mt-1 text-sm text-suave">O cabo e todo o histórico de registros dele serão apagados.</p>
-            <div className="mt-5 flex justify-end gap-2">
-              <button onClick={() => setExcluir(null)} className="h-10 rounded-lg px-4 font-medium ring-1 ring-borda">Cancelar</button>
-              <button onClick={confirmarExclusao} className="h-10 rounded-lg bg-erro px-4 font-semibold text-white">Excluir</button>
-            </div>
+      {aberto && <DetalheCabo key={aberto.id} cabo={aberto} fechar={() => setAberto(null)} mostrar={mostrar} aoMudar={recarregar} />}
+    </div>
+  );
+}
+
+// Detalhe do cabo no admin: dados do cadastro, edição da execução e exclusão (com confirmação)
+function DetalheCabo({ cabo, fechar, mostrar, aoMudar }: { cabo: Cabo; fechar: () => void; mostrar: Mostrar; aoMudar: () => Promise<void> }) {
+  const [dataCorte, setDataCorte] = useState(cabo.data_corte ?? "");
+  const [metragem, setMetragem] = useState(cabo.metragem_cortada?.toString() ?? "");
+  const [caboCortado, setCaboCortado] = useState(cabo.cabo_cortado ?? "");
+  const [dataLanc, setDataLanc] = useState(cabo.data_lancamento ?? "");
+  const [salvando, setSalvando] = useState(false);
+  const [erroForm, setErroForm] = useState("");
+  const [confirmarExclusao, setConfirmarExclusao] = useState(false);
+  const [excluindo, setExcluindo] = useState(false);
+
+  const metr = metragem === "" ? null : Number(metragem.replace(",", "."));
+  const statusPrevisto: Status = dataLanc ? "T" : dataCorte || metr != null || caboCortado.trim() ? "P" : "NI";
+
+  async function salvar() {
+    setErroForm("");
+    if (dataLanc && !dataCorte) return setErroForm("Informe a data do corte antes da data de lançamento.");
+    if (dataLanc && dataCorte && dataLanc < dataCorte) return setErroForm("A data de lançamento não pode ser antes da data do corte.");
+    if (metr != null && (Number.isNaN(metr) || metr < 0)) return setErroForm("Metragem inválida.");
+    setSalvando(true);
+    const { error } = await supabase.rpc("registrar_execucao", {
+      p_cabo_id: cabo.id,
+      p_data_corte: dataCorte || null,
+      p_metragem_cortada: metr,
+      p_cabo_cortado: caboCortado.trim() || null,
+      p_data_lancamento: dataLanc || null,
+    });
+    setSalvando(false);
+    if (error) return setErroForm(error.message);
+    mostrar("ok", `${cabo.tag} atualizado ✓ (status ${statusPrevisto})`);
+    fechar();
+    aoMudar();
+  }
+
+  async function excluir() {
+    setExcluindo(true);
+    const { error } = await supabase.rpc("excluir_cabo", { p_cabo_id: cabo.id });
+    setExcluindo(false);
+    if (error) {
+      mostrar("erro", `Não foi possível excluir ${cabo.tag}: ${error.message}`);
+      return;
+    }
+    mostrar("ok", `Cabo ${cabo.tag} excluído.`);
+    fechar();
+    aoMudar();
+  }
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && fechar();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [fechar]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={fechar}>
+      <aside
+        role="dialog"
+        aria-label={`Cabo ${cabo.tag}`}
+        onClick={(e) => e.stopPropagation()}
+        className="flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white shadow-2xl"
+      >
+        <header className="sticky top-0 z-10 bg-grafite text-white">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <button onClick={fechar} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-full hover:bg-white/10">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+            <h2 className="min-w-0 flex-1 truncate text-lg font-bold">{cabo.tag}</h2>
+            <SeloStatus status={statusPrevisto} curto />
           </div>
+          <div className="faixa-marca" />
+        </header>
+
+        <div className="flex-1 space-y-4 p-4">
+          <section className="rounded-2xl bg-[#e8efed] p-4">
+            <h3 className="font-bold">Dados do cadastro</h3>
+            <dl className="mt-2 grid grid-cols-[8rem_1fr] gap-y-1.5 text-sm">
+              {[
+                ["DE", cabo.de],
+                ["PARA", cabo.para],
+                ["Disciplina", cabo.disciplina],
+                ["Pavimento / Área", cabo.pavimento],
+                ["Painel", cabo.painel],
+                ["Cabo estimado", cabo.cabo_estimado],
+                ["Metragem estimada", formatarMetros(cabo.metragem_estimada)],
+              ].map(([r, v]) => (
+                <div key={r} className="contents">
+                  <dt className="text-suave">{r}</dt>
+                  <dd className="font-semibold break-words">{v ?? "—"}</dd>
+                </div>
+              ))}
+            </dl>
+          </section>
+
+          <section className="rounded-2xl p-4 ring-1 ring-borda">
+            <h3 className="font-bold">Execução</h3>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Campo rotulo="Data do corte"><input type="date" value={dataCorte} onChange={(e) => setDataCorte(e.target.value)} className={classeInput} /></Campo>
+              <Campo rotulo="Metragem cortada (m)"><input inputMode="decimal" value={metragem} onChange={(e) => setMetragem(e.target.value.replace(/[^\d.,]/g, ""))} className={classeInput} /></Campo>
+              <Campo rotulo="Cabo cortado"><input value={caboCortado} onChange={(e) => setCaboCortado(e.target.value)} placeholder={cabo.cabo_estimado ?? ""} className={classeInput} /></Campo>
+              <Campo rotulo="Data de lançamento"><input type="date" value={dataLanc} min={dataCorte || undefined} onChange={(e) => setDataLanc(e.target.value)} className={classeInput} /></Campo>
+            </div>
+            {erroForm && <div className="mt-3"><Aviso tipo="erro">{erroForm}</Aviso></div>}
+            <button onClick={salvar} disabled={salvando} className="gradiente-marca mt-4 h-12 w-full rounded-xl font-semibold text-white disabled:opacity-60">
+              {salvando ? "Salvando…" : "Salvar alterações"}
+            </button>
+          </section>
+
+          {/* Exclusão fica aqui dentro, separada e com confirmação, para não apagar sem querer */}
+          <section className="rounded-2xl p-4 ring-1 ring-erro/30">
+            {!confirmarExclusao ? (
+              <button onClick={() => setConfirmarExclusao(true)} className="flex w-full items-center justify-center gap-2 font-semibold text-erro">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+                Excluir cabo
+              </button>
+            ) : (
+              <>
+                <p className="font-bold text-erro">Excluir {cabo.tag}?</p>
+                <p className="mt-1 text-sm text-suave">O cabo e todo o histórico de preenchimentos dele serão apagados. Isso não pode ser desfeito.</p>
+                <div className="mt-3 grid grid-cols-2 gap-2">
+                  <button onClick={() => setConfirmarExclusao(false)} disabled={excluindo} className="h-11 rounded-xl font-semibold ring-1 ring-borda">Cancelar</button>
+                  <button onClick={excluir} disabled={excluindo} className="h-11 rounded-xl bg-erro font-semibold text-white disabled:opacity-60">
+                    {excluindo ? "Excluindo…" : "Sim, excluir"}
+                  </button>
+                </div>
+              </>
+            )}
+          </section>
         </div>
-      )}
+      </aside>
     </div>
   );
 }
@@ -403,7 +546,7 @@ function Importar({ recarregar, irParaCabos }: { recarregar: () => Promise<void>
 
 type Usuario = Perfil & { email: string };
 
-function Usuarios({ meuId }: { meuId: string }) {
+function Usuarios({ meuId, mostrar }: { meuId: string; mostrar: Mostrar }) {
   const [lista, setLista] = useState<Usuario[] | null>(null);
   const [form, setForm] = useState({ nome: "", email: "", senha: "", papel: "campo" });
   const [msg, setMsg] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
@@ -449,12 +592,15 @@ function Usuarios({ meuId }: { meuId: string }) {
 
   async function alterar(id: string, mudancas: Record<string, unknown>) {
     setMsg(null);
+    const nome = lista?.find((u) => u.id === id)?.nome ?? "Usuário";
     try {
       await chamar("PATCH", { id, ...mudancas });
-      if (mudancas.senha) setMsg({ tipo: "ok", texto: "Senha alterada." });
+      if (mudancas.senha) mostrar("ok", `Senha de ${nome} alterada ✓`);
+      else if (mudancas.papel) mostrar("ok", `${nome} agora tem acesso ${mudancas.papel === "admin" ? "Admin (painel completo)" : "Campo (só o formulário)"} ✓`);
+      else if (mudancas.ativo !== undefined) mostrar(mudancas.ativo ? "ok" : "alerta", mudancas.ativo ? `${nome} reativado ✓` : `${nome} bloqueado — não consegue mais entrar.`);
       carregar();
     } catch (e) {
-      setMsg({ tipo: "erro", texto: (e as Error).message });
+      mostrar("erro", (e as Error).message);
     }
   }
 

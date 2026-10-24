@@ -1,7 +1,40 @@
 "use client";
 
+import { useCallback, useRef, useState } from "react";
 import Image from "next/image";
 import { STATUS_INFO, type Status } from "@/lib/tipos";
+
+export type TipoAviso = "ok" | "alerta" | "erro";
+export type AvisoFlutuante = { tipo: TipoAviso; texto: string };
+
+// Aviso flutuante no topo da tela — retorno padrão de qualquer ação (salvar, excluir, atualizar…)
+export function useAvisoFlutuante() {
+  const [aviso, setAviso] = useState<AvisoFlutuante | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mostrar = useCallback((tipo: TipoAviso, texto: string) => {
+    if (timer.current) clearTimeout(timer.current);
+    setAviso({ tipo, texto });
+    // erros ficam até a pessoa fechar; o resto some sozinho
+    if (tipo !== "erro") timer.current = setTimeout(() => setAviso(null), 5000);
+  }, []);
+  const fechar = useCallback(() => setAviso(null), []);
+  return { aviso, mostrar, fechar };
+}
+
+export function AvisoNoTopo({ aviso, fechar }: { aviso: AvisoFlutuante | null; fechar: () => void }) {
+  if (!aviso) return null;
+  const c = { ok: "bg-st-t-fundo text-st-t ring-st-t/30", alerta: "bg-st-p-fundo text-st-p ring-st-p/30", erro: "bg-erro-fundo text-erro ring-erro/30" }[aviso.tipo];
+  return (
+    <div role="status" aria-live="polite" className="pointer-events-none fixed inset-x-0 top-[calc(5.75rem+env(safe-area-inset-top))] z-40 flex justify-center px-4">
+      <div className={`pointer-events-auto flex w-full max-w-xl items-start gap-3 rounded-xl px-4 py-3 text-sm font-semibold shadow-lg ring-1 ${c}`}>
+        <span className="flex-1">{aviso.texto}</span>
+        <button onClick={fechar} aria-label="Fechar aviso" className="-my-1 -mr-1 rounded px-1.5 text-lg leading-none opacity-70 hover:opacity-100">
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export function Cabecalho({
   titulo,

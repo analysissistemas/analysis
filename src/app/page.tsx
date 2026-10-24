@@ -1,13 +1,21 @@
 "use client";
 
-// Tela do usuário de campo: escolher o cabo e preencher a execução — nada além disso.
-import { useCallback, useEffect, useMemo, useState } from "react";
+// Tela do usuário de campo: lista de cabos (com o que falta) → toca no cabo → preenche a execução.
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Aviso, Cabecalho, Campo, SeloStatus, Selecao, classeInput } from "@/components/ui";
+import { Aviso, AvisoNoTopo, Cabecalho, Campo, SeloStatus, Selecao, classeInput, useAvisoFlutuante, type TipoAviso } from "@/components/ui";
 import { baixarCabos, salvarExecucao, sincronizar, useCabosLocais, useOnline, usePendentes, type Pendente } from "@/lib/offline";
 import { sair, useSessao } from "@/lib/sessao";
-import { calcularStatus, formatarMetros, type Cabo, type Execucao } from "@/lib/tipos";
+import { calcularStatus, formatarMetros, type Cabo, type Execucao, type Status } from "@/lib/tipos";
+
+const ORDEM_STATUS: Record<Status, number> = { NI: 0, P: 1, T: 2 };
+const FILTROS_STATUS: [Status | "", string][] = [
+  ["", "Todos"],
+  ["NI", "Falta"],
+  ["P", "Parcial"],
+  ["T", "Terminado"],
+];
 
 export default function AppCampo() {
   const { perfil, carregando } = useSessao();
@@ -17,17 +25,56 @@ export default function AppCampo() {
   const online = useOnline();
   const [disciplina, setDisciplina] = useState("");
   const [pavimento, setPavimento] = useState("");
+  const [status, setStatus] = useState<Status | "">("");
+  const [busca, setBusca] = useState("");
   const [caboId, setCaboId] = useState<number | null>(null);
   const [menu, setMenu] = useState(false);
+  const [atualizando, setAtualizando] = useState(false);
+  const { aviso, mostrar, fechar } = useAvisoFlutuante();
+  const rolagemDaLista = useRef(0);
 
-  // Envia o que ficou pendente e baixa a lista atualizada (o cache local avisa a tela)
-  const atualizar = useCallback(async () => {
-    if (!navigator.onLine) return;
-    await sincronizar();
-    try {
-      await baixarCabos();
-    } catch {}
-  }, []);
+  function abrir(id: number) {
+    rolagemDaLista.current = window.scrollY;
+    fechar();
+    setCaboId(id);
+    window.scrollTo(0, 0);
+  }
+
+  // Volta para a lista no mesmo ponto em que a pessoa estava
+  function voltarParaLista() {
+    setCaboId(null);
+    requestAnimationFrame(() => window.scrollTo(0, rolagemDaLista.current));
+  }
+
+  // Depois de enviar: volta para a lista (formulário limpo) e mostra a confirmação
+  function aoEnviar(tipo: TipoAviso, texto: string) {
+    voltarParaLista();
+    mostrar(tipo, texto);
+  }
+
+  // Envia o que ficou pendente e baixa a lista atualizada (o cache local avisa a tela).
+  // manual = a pessoa pediu (menu ou faixa de pendentes): sempre dá retorno na tela.
+  const atualizar = useCallback(
+    async (manual = false) => {
+      if (!navigator.onLine) {
+        if (manual) mostrar("alerta", "Sem internet agora. Os dados serão atualizados quando a conexão voltar.");
+        return;
+      }
+      if (manual) setAtualizando(true);
+      try {
+        const { enviados, restantes } = await sincronizar();
+        const lista = await baixarCabos();
+        if (enviados > 0) mostrar("ok", `${enviados} preenchimento(s) que estavam no celular foram enviados ✓`);
+        else if (restantes > 0) mostrar("alerta", `${restantes} preenchimento(s) não foram enviados. Abra o cabo para ver o motivo.`);
+        else if (manual) mostrar("ok", `Dados atualizados ✓ — ${lista.length} cabos`);
+      } catch {
+        if (manual) mostrar("erro", "Não foi possível atualizar. Verifique a conexão e tente de novo.");
+      } finally {
+        if (manual) setAtualizando(false);
+      }
+    },
+    [mostrar],
+  );
 
   useEffect(() => {
     if (carregando) return;
@@ -35,28 +82,62 @@ export default function AppCampo() {
       router.replace("/login");
       return;
     }
-    atualizar();
-    window.addEventListener("online", atualizar);
-    return () => window.removeEventListener("online", atualizar);
+    // sincroniza ao abrir (fora do render) e sempre que a internet voltar
+    const inicio = setTimeout(() => atualizar(), 0);
+    const aoVoltarInternet = () => atualizar();
+    window.addEventListener("online", aoVoltarInternet);
+    return () => {
+      clearTimeout(inicio);
+      window.removeEventListener("online", aoVoltarInternet);
+    };
   }, [carregando, perfil, atualizar, router]);
+
+  const pendPorCabo = useMemo(() => new Map(pend.map((p) => [p.cabo_id, p])), [pend]);
+  // status considerando o que está salvo no celular e ainda não foi enviado
+  const statusDe = useCallback((c: Cabo) => (pendPorCabo.has(c.id) ? calcularStatus(pendPorCabo.get(c.id)!) : c.status), [pendPorCabo]);
 
   const disciplinas = useMemo(() => [...new Set(cabos.map((c) => c.disciplina).filter(Boolean) as string[])].sort(), [cabos]);
   const pavimentos = useMemo(
     () => [...new Set(cabos.filter((c) => !disciplina || c.disciplina === disciplina).map((c) => c.pavimento).filter(Boolean) as string[])].sort(),
     [cabos, disciplina],
   );
-  const opcoesTag = cabos.filter((c) => (!disciplina || c.disciplina === disciplina) && (!pavimento || c.pavimento === pavimento));
-  const pendPorCabo = new Map(pend.map((p) => [p.cabo_id, p]));
+  const daArea = cabos.filter((c) => (!disciplina || c.disciplina === disciplina) && (!pavimento || c.pavimento === pavimento));
+  const contagem = { NI: 0, P: 0, T: 0 };
+  daArea.forEach((c) => contagem[statusDe(c)]++);
+  const termo = busca.trim().toLowerCase();
+  const visiveis = daArea
+    .filter((c) => (!status || statusDe(c) === status) && (!termo || `${c.tag} ${c.de ?? ""} ${c.para ?? ""}`.toLowerCase().includes(termo)))
+    .sort((a, b) => ORDEM_STATUS[statusDe(a)] - ORDEM_STATUS[statusDe(b)] || a.tag.localeCompare(b.tag));
+
   const cabo = caboId != null ? cabos.find((c) => c.id === caboId) : undefined;
 
   if (carregando || !perfil) {
     return <div className="grid flex-1 place-items-center text-suave">Carregando…</div>;
   }
 
+  if (cabo) {
+    return (
+      <>
+        <Preenchimento
+          key={cabo.id}
+          cabo={cabo}
+          pendente={pendPorCabo.get(cabo.id)}
+          sugestoesCabo={[...new Set(cabos.map((c) => c.cabo_estimado).filter(Boolean) as string[])].sort()}
+          aoEnviar={aoEnviar}
+          voltar={voltarParaLista}
+        />
+        <AvisoNoTopo aviso={aviso} fechar={fechar} />
+      </>
+    );
+  }
+
+  const total = daArea.length;
+  const faltam = contagem.NI + contagem.P;
+
   return (
     <div className="flex min-h-dvh flex-col">
       <Cabecalho
-        titulo="Preenchimento do cabo"
+        titulo="Controle de cabos"
         subtitulo={perfil.nome}
         direita={
           <div className="relative">
@@ -64,11 +145,17 @@ export default function AppCampo() {
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
             </button>
             {menu && (
-              <div className="absolute right-0 mt-2 w-48 overflow-hidden rounded-xl bg-white text-texto shadow-lg ring-1 ring-borda">
+              // camada invisível: tocar fora fecha o menu
+              <button aria-hidden tabIndex={-1} onClick={() => setMenu(false)} className="fixed inset-0 z-30 cursor-default" />
+            )}
+            {menu && (
+              <div className="absolute right-0 z-40 mt-2 w-52 overflow-hidden rounded-xl bg-white text-texto shadow-lg ring-1 ring-borda">
                 {perfil.papel === "admin" && (
                   <Link href="/admin" className="block px-4 py-3 hover:bg-fundo">Painel admin</Link>
                 )}
-                <button onClick={() => { setMenu(false); atualizar(); }} className="block w-full px-4 py-3 text-left hover:bg-fundo">Atualizar dados</button>
+                <button onClick={() => { setMenu(false); atualizar(true); }} disabled={atualizando} className="block w-full px-4 py-3 text-left hover:bg-fundo disabled:opacity-60">
+                  {atualizando ? "Atualizando…" : "Atualizar dados"}
+                </button>
                 <button onClick={sair} className="block w-full px-4 py-3 text-left text-erro hover:bg-fundo">Sair</button>
               </div>
             )}
@@ -81,61 +168,131 @@ export default function AppCampo() {
         </div>
       )}
       {online && pend.length > 0 && (
-        <button onClick={atualizar} className="bg-teal-claro px-4 py-2 text-center text-sm font-medium text-teal-escuro">
-          {pend.length} preenchimento(s) aguardando envio — toque para enviar
+        <button onClick={() => atualizar(true)} disabled={atualizando} className="bg-teal-claro px-4 py-2 text-center text-sm font-medium text-teal-escuro">
+          {atualizando ? "Enviando…" : `${pend.length} preenchimento(s) aguardando envio — toque para enviar`}
         </button>
       )}
 
-      <main className="mx-auto w-full max-w-xl flex-1 bg-white px-4 pt-4 pb-32">
+      <main className="mx-auto w-full max-w-xl flex-1 px-4 pt-4 pb-10">
         <div className="grid grid-cols-2 gap-3">
           <Campo rotulo="Disciplina">
-            <Selecao valor={disciplina} aoMudar={(v) => { setDisciplina(v); setPavimento(""); setCaboId(null); }} opcoes={disciplinas} todos="Todas" />
+            <Selecao valor={disciplina} aoMudar={(v) => { setDisciplina(v); setPavimento(""); }} opcoes={disciplinas} todos="Todas" />
           </Campo>
           <Campo rotulo="Pavimento / Área">
-            <Selecao valor={pavimento} aoMudar={(v) => { setPavimento(v); setCaboId(null); }} opcoes={pavimentos} todos="Todos" />
-          </Campo>
-        </div>
-        <div className="mt-3">
-          <Campo rotulo="TAG do cabo">
-            <select
-              value={caboId ?? ""}
-              onChange={(e) => setCaboId(e.target.value ? Number(e.target.value) : null)}
-              className={`${classeInput} appearance-none bg-[url('data:image/svg+xml;utf8,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2214%22 height=%2214%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23142322%22 stroke-width=%222.5%22><path d=%22M6 9l6 6 6-6%22/></svg>')] bg-[right_0.75rem_center] bg-no-repeat pr-9 font-semibold`}
-            >
-              <option value="">Selecionar cabo ({opcoesTag.length})</option>
-              {opcoesTag.map((c) => {
-                const p = pendPorCabo.get(c.id);
-                const st = p ? calcularStatus(p) : c.status;
-                return (
-                  <option key={c.id} value={c.id}>
-                    {c.tag} · {st}
-                  </option>
-                );
-              })}
-            </select>
+            <Selecao valor={pavimento} aoMudar={setPavimento} opcoes={pavimentos} todos="Todos" />
           </Campo>
         </div>
 
+        {/* Resumo do que falta — mesma leitura da visão do admin */}
+        {total > 0 && (
+          <section className="mt-4 rounded-2xl bg-white p-4 ring-1 ring-borda">
+            <div className="flex items-baseline justify-between gap-2">
+              <p className="text-lg font-bold text-grafite">
+                {faltam === 0 ? "Tudo terminado ✓" : `Faltam ${faltam} de ${total} cabos`}
+              </p>
+              <p className="text-sm text-suave">{Math.round((contagem.T / total) * 100)}% concluído</p>
+            </div>
+            <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-st-ni-fundo">
+              <div className="bg-st-t" style={{ width: `${(contagem.T / total) * 100}%` }} />
+              <div className="bg-st-p" style={{ width: `${(contagem.P / total) * 100}%` }} />
+            </div>
+            <div className="mt-3 grid grid-cols-4 gap-1.5">
+              {FILTROS_STATUS.map(([v, r]) => {
+                const n = v ? contagem[v] : total;
+                const ativo = status === v;
+                return (
+                  <button
+                    key={v || "todos"}
+                    onClick={() => setStatus(v)}
+                    aria-pressed={ativo}
+                    className={`rounded-xl px-1 py-2 text-center transition ${ativo ? "bg-teal text-white shadow-sm" : "bg-fundo text-texto hover:bg-teal-claro"}`}
+                  >
+                    <span className="block text-lg leading-none font-bold">{n}</span>
+                    <span className="mt-1 block text-xs font-medium">{r}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        <input
+          type="search"
+          placeholder="Buscar por TAG, DE ou PARA"
+          value={busca}
+          onChange={(e) => setBusca(e.target.value)}
+          className={`${classeInput} mt-4`}
+        />
+
+        <h2 className="mt-5 mb-3 text-lg font-bold">
+          Cabos <span className="font-normal text-suave">({visiveis.length})</span>
+        </h2>
+
         {cabos.length === 0 ? (
-          <p className="mt-6 rounded-xl bg-fundo p-6 text-center text-suave">
+          <p className="rounded-xl bg-white p-6 text-center text-suave ring-1 ring-borda">
             Nenhum cabo carregado ainda. Conecte à internet ou peça ao administrador para importar a planilha.
           </p>
-        ) : !cabo ? (
-          <p className="mt-6 rounded-xl bg-fundo p-6 text-center text-suave">Escolha a TAG do cabo para preencher.</p>
+        ) : visiveis.length === 0 ? (
+          <div className="rounded-xl bg-white p-6 text-center text-suave ring-1 ring-borda">
+            Nenhum cabo com esses filtros.
+            <button onClick={() => { setStatus(""); setBusca(""); }} className="mt-2 block w-full font-semibold text-teal">
+              Limpar filtros
+            </button>
+          </div>
         ) : (
-          <Preenchimento
-            key={cabo.id}
-            cabo={cabo}
-            pendente={pendPorCabo.get(cabo.id)}
-            sugestoesCabo={[...new Set(cabos.map((c) => c.cabo_estimado).filter(Boolean) as string[])].sort()}
-          />
+          <ul className="space-y-3">
+            {visiveis.map((c) => {
+              const p = pendPorCabo.get(c.id);
+              return (
+                <li key={c.id}>
+                  <button
+                    onClick={() => abrir(c.id)}
+                    className="flex w-full items-center gap-3 rounded-2xl bg-white p-4 text-left shadow-sm ring-1 ring-borda transition hover:ring-teal/50 active:scale-[0.99]"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-lg font-bold text-grafite">{c.tag}</span>
+                        <SeloStatus status={statusDe(c)} />
+                      </div>
+                      {/* DE → PARA em destaque: é por aqui que o pessoal de campo reconhece o cabo */}
+                      <dl className="mt-2 grid grid-cols-[3.25rem_1fr] gap-y-1 text-sm">
+                        <dt className="font-semibold text-suave">DE</dt>
+                        <dd className="font-semibold break-words text-texto">{c.de ?? "—"}</dd>
+                        <dt className="font-semibold text-suave">PARA</dt>
+                        <dd className="font-semibold break-words text-texto">{c.para ?? "—"}</dd>
+                      </dl>
+                      {p && (
+                        <p className={`mt-2 text-xs font-semibold ${p.erro ? "text-erro" : "text-st-p"}`}>
+                          {p.erro ? `Não enviado: ${p.erro}` : "Salvo no celular — aguardando envio"}
+                        </p>
+                      )}
+                    </div>
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-suave"><path d="M9 6l6 6-6 6" /></svg>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         )}
       </main>
+      <AvisoNoTopo aviso={aviso} fechar={fechar} />
     </div>
   );
 }
 
-function Preenchimento({ cabo, pendente, sugestoesCabo }: { cabo: Cabo; pendente?: Pendente; sugestoesCabo: string[] }) {
+function Preenchimento({
+  cabo,
+  pendente,
+  sugestoesCabo,
+  aoEnviar,
+  voltar,
+}: {
+  cabo: Cabo;
+  pendente?: Pendente;
+  sugestoesCabo: string[];
+  aoEnviar: (tipo: TipoAviso, texto: string) => void;
+  voltar: () => void;
+}) {
   const base: Execucao = pendente ?? cabo;
   const [dataCorte, setDataCorte] = useState(base.data_corte ?? "");
   const [metragem, setMetragem] = useState(base.metragem_cortada?.toString() ?? "");
@@ -155,6 +312,17 @@ function Preenchimento({ cabo, pendente, sugestoesCabo }: { cabo: Cabo; pendente
   const statusPrevisto = calcularStatus(exec);
   const excedeu = exec.metragem_cortada != null && cabo.metragem_estimada != null && exec.metragem_cortada > cabo.metragem_estimada;
   const caboDiferente = exec.cabo_cortado && cabo.cabo_estimado && exec.cabo_cortado !== cabo.cabo_estimado;
+  const [confirmarSaida, setConfirmarSaida] = useState(false);
+  const alterado =
+    exec.data_corte !== (base.data_corte ?? null) ||
+    exec.metragem_cortada !== (base.metragem_cortada ?? null) ||
+    exec.cabo_cortado !== (base.cabo_cortado ?? null) ||
+    exec.data_lancamento !== (base.data_lancamento ?? null);
+  // Evita perder o que foi digitado ao voltar sem salvar
+  function tentarVoltar() {
+    if (alterado && !salvando) setConfirmarSaida(true);
+    else voltar();
+  }
   const opcoesCabo = [...new Set([cabo.cabo_estimado, ...sugestoesCabo, base.cabo_cortado].filter(Boolean) as string[])];
 
   async function salvar() {
@@ -176,18 +344,19 @@ function Preenchimento({ cabo, pendente, sugestoesCabo }: { cabo: Cabo; pendente
     setSalvando(false);
     const hora = new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
     if (r.estado === "enviado") {
-      setMsg({ tipo: "ok", texto: `Enviado ✓ — ${cabo.tag} atualizado às ${hora} (status ${calcularStatus(exec)}).` });
-      setTimeout(() => setMsg((m) => (m?.tipo === "ok" ? null : m)), 6000);
+      aoEnviar("ok", `Enviado ✓ — ${cabo.tag} atualizado às ${hora} (status ${calcularStatus(exec)}).`);
     } else if (r.estado === "pendente") {
-      setMsg({ tipo: "alerta", texto: "Sem internet: salvo no celular, será enviado quando a conexão voltar." });
+      aoEnviar("alerta", `${cabo.tag}: sem internet, salvo no celular. Será enviado quando a conexão voltar.`);
     } else {
       setMsg({ tipo: "erro", texto: r.mensagem ?? "Não foi possível salvar." });
     }
   }
 
   return (
-    <>
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-2">
+    <div className="flex min-h-dvh flex-col">
+      <Cabecalho titulo="Preenchimento do cabo" voltar={tentarVoltar} />
+      <main className="mx-auto w-full max-w-xl flex-1 bg-white px-4 pt-2 pb-36">
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-[1.75rem] leading-tight font-extrabold tracking-tight text-grafite">{cabo.tag}</h2>
         <SeloStatus status={statusPrevisto} />
       </div>
@@ -255,9 +424,23 @@ function Preenchimento({ cabo, pendente, sugestoesCabo }: { cabo: Cabo; pendente
           </div>
         )}
         <button onClick={salvar} disabled={salvando} className="mx-auto block w-full max-w-xl gradiente-marca rounded-xl py-4 text-lg font-semibold text-white shadow-md transition hover:brightness-95 disabled:opacity-60">
-          {salvando ? "Enviando…" : msg?.tipo === "ok" ? "Enviado ✓" : "Salvar preenchimento"}
+          {salvando ? "Enviando…" : "Salvar preenchimento"}
         </button>
       </div>
-    </>
+      </main>
+
+      {confirmarSaida && (
+        <div className="fixed inset-0 z-50 grid place-items-end bg-black/40 p-4 sm:place-items-center">
+          <div className="w-full max-w-sm rounded-2xl bg-white p-5">
+            <h3 className="text-lg font-bold">Sair sem salvar?</h3>
+            <p className="mt-1 text-suave">O que você preencheu em {cabo.tag} ainda não foi enviado.</p>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button onClick={voltar} className="h-12 rounded-xl font-semibold text-erro ring-1 ring-borda">Sair sem salvar</button>
+              <button onClick={() => setConfirmarSaida(false)} className="gradiente-marca h-12 rounded-xl font-semibold text-white">Continuar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
