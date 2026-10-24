@@ -1,6 +1,6 @@
 // Service worker: mantém o app abrindo mesmo sem internet na obra.
 // Páginas: rede primeiro, cache se offline. Arquivos estáticos: cache primeiro.
-const CACHE = "cabos-v2";
+const CACHE = "cabos-v3";
 const PAGINAS = ["/", "/login", "/admin"];
 
 self.addEventListener("install", (e) => {

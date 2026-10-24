@@ -74,7 +74,7 @@ export default function Admin() {
           ))}
         </div>
       </div>
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+      <main className={`mx-auto w-full flex-1 px-4 py-6 ${aba === "cabos" ? "max-w-[1800px]" : "max-w-6xl"}`}>
         {erro && <div className="mb-4"><Aviso tipo="erro">{erro}</Aviso></div>}
         {aba === "painel" && <Painel cabos={cabos} />}
         {aba === "cabos" && <TabelaCabos cabos={cabos} recarregar={recarregar} />}
@@ -89,9 +89,9 @@ function Barra({ t, p, total }: { t: number; p: number; total: number }) {
   const pt = total ? (t / total) * 100 : 0;
   const pp = total ? (p / total) * 100 : 0;
   return (
-    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-ni-fundo">
-      <div className="bg-t" style={{ width: `${pt}%` }} />
-      <div className="bg-p" style={{ width: `${pp}%` }} />
+    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-st-ni-fundo">
+      <div className="bg-st-t" style={{ width: `${pt}%` }} />
+      <div className="bg-st-p" style={{ width: `${pp}%` }} />
     </div>
   );
 }
@@ -103,10 +103,10 @@ function Painel({ cabos }: { cabos: Cabo[] }) {
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
-          ["Total de cabos", r.total, "text-marinho", ""],
-          ["Terminados (T)", r.T, "text-t", `${pct(r.T)}%`],
-          ["Parciais (P)", r.P, "text-p", `${pct(r.P)}%`],
-          ["Não iniciados (NI)", r.NI, "text-ni", `${pct(r.NI)}%`],
+          ["Total de cabos", r.total, "text-grafite", ""],
+          ["Terminados (T)", r.T, "text-st-t", `${pct(r.T)}%`],
+          ["Parciais (P)", r.P, "text-st-p", `${pct(r.P)}%`],
+          ["Não iniciados (NI)", r.NI, "text-st-ni", `${pct(r.NI)}%`],
         ].map(([rot, v, cor, sub]) => (
           <div key={rot as string} className="rounded-xl bg-white p-4 ring-1 ring-borda">
             <p className="text-sm text-suave">{rot}</p>
@@ -118,10 +118,10 @@ function Painel({ cabos }: { cabos: Cabo[] }) {
       </div>
       <div className="rounded-xl bg-white p-4 ring-1 ring-borda">
         <p className="text-sm text-suave">Metragem cortada / estimada</p>
-        <p className="mt-1 text-2xl font-bold text-marinho">
+        <p className="mt-1 text-2xl font-bold text-grafite">
           {formatarMetros(r.mCortados)} <span className="text-base font-medium text-suave">de {formatarMetros(r.mEstimados)}</span>
         </p>
-        <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-ni-fundo">
+        <div className="mt-3 flex h-2.5 overflow-hidden rounded-full bg-st-ni-fundo">
           <div className="gradiente-marca" style={{ width: `${r.mEstimados ? Math.min(100, (r.mCortados / r.mEstimados) * 100) : 0}%` }} />
         </div>
       </div>
@@ -149,9 +149,9 @@ function Painel({ cabos }: { cabos: Cabo[] }) {
         ))}
       </div>
       <p className="flex flex-wrap gap-4 text-sm text-suave">
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-t" /> T · Terminado (lançado)</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-p" /> P · Parcial (cortado, aguardando lançamento)</span>
-        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-ni" /> NI · Não iniciado</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-st-t" /> T · Terminado (lançado)</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-st-p" /> P · Parcial (cortado, aguardando lançamento)</span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-st-ni" /> NI · Não iniciado</span>
       </p>
     </div>
   );
@@ -196,7 +196,7 @@ function TabelaCabos({ cabos, recarregar }: { cabos: Cabo[]; recarregar: () => P
 
   return (
     <div>
-      <div className="grid gap-3 md:grid-cols-[1fr_1fr_1fr_1.5fr]">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-[1fr_1fr_1fr_1.5fr]">
         <Campo rotulo="Disciplina"><Selecao valor={disciplina} aoMudar={setDisciplina} opcoes={disciplinas} todos="Todas" /></Campo>
         <Campo rotulo="Pavimento / Área"><Selecao valor={pavimento} aoMudar={setPavimento} opcoes={pavimentos} todos="Todas" /></Campo>
         <Campo rotulo="Status"><Selecao valor={status} aoMudar={setStatus} opcoes={["NI", "P", "T"]} todos="Todos" /></Campo>
@@ -204,7 +204,7 @@ function TabelaCabos({ cabos, recarregar }: { cabos: Cabo[]; recarregar: () => P
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <p className="mr-auto text-sm text-suave">{filtrados.length} de {cabos.length} cabos</p>
-        <button onClick={() => exportar("xlsx")} disabled={!!exportando || !filtrados.length} className="flex h-11 items-center gap-2 rounded-lg bg-white px-4 font-semibold text-t ring-1 ring-borda hover:bg-t-fundo disabled:opacity-50">
+        <button onClick={() => exportar("xlsx")} disabled={!!exportando || !filtrados.length} className="flex h-11 items-center gap-2 rounded-lg bg-white px-4 font-semibold text-st-t ring-1 ring-borda hover:bg-st-t-fundo disabled:opacity-50">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z" /><path d="M8 13l4 5M12 13l-4 5" /></svg>
           {exportando === "xlsx" ? "Gerando…" : "Exportar Excel"}
         </button>
@@ -214,33 +214,42 @@ function TabelaCabos({ cabos, recarregar }: { cabos: Cabo[]; recarregar: () => P
         </button>
       </div>
 
-      <div className="mt-4 overflow-x-auto rounded-xl bg-white ring-1 ring-borda">
-        <table className="w-full min-w-[1000px] text-sm">
-          <thead className="bg-marinho text-left text-xs uppercase tracking-wide text-white">
+      {/* TAG fixa à esquerda e Status fixo à direita: continuam visíveis ao rolar para o lado */}
+      <div className="mt-4 max-h-[calc(100dvh-16rem)] overflow-auto rounded-xl bg-white ring-1 ring-borda">
+        <table className="w-full border-separate border-spacing-0 text-[13px]">
+          <thead className="sticky top-0 z-20 text-left text-[11px] uppercase tracking-wide text-white">
             <tr>
-              {["TAG", "Disciplina", "Pavimento", "Cabo est.", "DE → PARA", "m est.", "Corte", "m cort.", "Cabo cortado", "Lançamento", "Status", ""].map((h) => (
-                <th key={h} className="px-3 py-2.5 font-semibold">{h}</th>
+              {["TAG", "Disciplina", "Pavimento", "Cabo est.", "DE", "PARA", "m est.", "Corte", "m cort.", "Cabo cortado", "Lançamento", "Status"].map((h, i) => (
+                <th
+                  key={h}
+                  className={`bg-grafite px-2.5 py-2.5 font-semibold whitespace-nowrap ${i === 0 ? "sticky left-0 z-10" : ""} ${i === 11 ? "sticky right-0 z-10" : ""} ${[6, 8].includes(i) ? "text-right" : ""}`}
+                >
+                  {h}
+                </th>
               ))}
             </tr>
           </thead>
           <tbody>
             {filtrados.map((c) => (
-              <tr key={c.id} className="border-t border-borda align-top hover:bg-fundo">
-                <td className="px-3 py-2 font-bold whitespace-nowrap text-marinho">{c.tag}</td>
-                <td className="px-3 py-2">{c.disciplina}</td>
-                <td className="px-3 py-2 whitespace-nowrap">{c.pavimento}</td>
-                <td className="px-3 py-2 whitespace-nowrap">{c.cabo_estimado}</td>
-                <td className="px-3 py-2 text-xs text-suave">{c.de}<br />→ {c.para}</td>
-                <td className="px-3 py-2 text-right">{c.metragem_estimada ?? ""}</td>
-                <td className="px-3 py-2 whitespace-nowrap">{c.data_corte ? formatarData(c.data_corte) : ""}</td>
-                <td className={`px-3 py-2 text-right ${c.metragem_cortada != null && c.metragem_estimada != null && c.metragem_cortada > c.metragem_estimada ? "font-bold text-p" : ""}`}>{c.metragem_cortada ?? ""}</td>
-                <td className={`px-3 py-2 whitespace-nowrap ${c.cabo_cortado && c.cabo_estimado && c.cabo_cortado !== c.cabo_estimado ? "font-bold text-p" : ""}`}>{c.cabo_cortado}</td>
-                <td className="px-3 py-2 whitespace-nowrap">{c.data_lancamento ? formatarData(c.data_lancamento) : ""}</td>
-                <td className="px-3 py-2"><SeloStatus status={c.status as Status} curto /></td>
-                <td className="px-3 py-2">
-                  <button onClick={() => setExcluir(c)} aria-label={`Excluir ${c.tag}`} className="rounded p-1 text-suave hover:bg-erro-fundo hover:text-erro">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
-                  </button>
+              <tr key={c.id} className="group">
+                <td className="sticky left-0 z-10 border-t border-r border-borda bg-white px-2.5 py-2 font-bold whitespace-nowrap text-grafite group-hover:bg-fundo">{c.tag}</td>
+                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.disciplina}</td>
+                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.pavimento}</td>
+                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.cabo_estimado}</td>
+                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap text-suave group-hover:bg-fundo">{c.de}</td>
+                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap text-suave group-hover:bg-fundo">{c.para}</td>
+                <td className="border-t border-borda px-2.5 py-2 text-right group-hover:bg-fundo">{c.metragem_estimada ?? ""}</td>
+                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.data_corte ? formatarData(c.data_corte) : ""}</td>
+                <td className={`border-t border-borda px-2.5 py-2 text-right group-hover:bg-fundo ${c.metragem_cortada != null && c.metragem_estimada != null && c.metragem_cortada > c.metragem_estimada ? "font-bold text-st-p" : ""}`}>{c.metragem_cortada ?? ""}</td>
+                <td className={`border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo ${c.cabo_cortado && c.cabo_estimado && c.cabo_cortado !== c.cabo_estimado ? "font-bold text-st-p" : ""}`}>{c.cabo_cortado}</td>
+                <td className="border-t border-borda px-2.5 py-2 whitespace-nowrap group-hover:bg-fundo">{c.data_lancamento ? formatarData(c.data_lancamento) : ""}</td>
+                <td className="sticky right-0 z-10 border-t border-l border-borda bg-white px-2.5 py-1.5 group-hover:bg-fundo">
+                  <div className="flex items-center justify-between gap-2">
+                    <SeloStatus status={c.status as Status} curto />
+                    <button onClick={() => setExcluir(c)} aria-label={`Excluir ${c.tag}`} title="Excluir cabo" className="rounded p-1 text-suave hover:bg-erro-fundo hover:text-erro">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -349,7 +358,7 @@ function Importar({ recarregar, irParaCabos }: { recarregar: () => Promise<void>
             </div>
           )}
           {leitura.avisos.length > 0 && (
-            <div className="mt-3 rounded-lg bg-p-fundo p-3 text-sm text-p">
+            <div className="mt-3 rounded-lg bg-st-p-fundo p-3 text-sm text-st-p">
               <p className="font-semibold">Atenção ({leitura.avisos.length}):</p>
               <ul className="mt-1 list-disc pl-5">{leitura.avisos.slice(0, 20).map((e) => <li key={e}>{e}</li>)}</ul>
             </div>
@@ -486,7 +495,7 @@ function Usuarios({ meuId }: { meuId: string }) {
                     </select>
                   </td>
                   <td className="px-3 py-2">
-                    <button disabled={u.id === meuId} onClick={() => alterar(u.id, { ativo: !u.ativo })} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${u.ativo ? "bg-t-fundo text-t" : "bg-ni-fundo text-ni"}`}>
+                    <button disabled={u.id === meuId} onClick={() => alterar(u.id, { ativo: !u.ativo })} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${u.ativo ? "bg-st-t-fundo text-st-t" : "bg-st-ni-fundo text-st-ni"}`}>
                       {u.ativo ? "Ativo" : "Bloqueado"}
                     </button>
                   </td>

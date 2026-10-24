@@ -4,18 +4,19 @@ import autoTable from "jspdf-autotable";
 import { agrupar, hoje, resumo } from "./planilha";
 import { STATUS_INFO, formatarData, type Cabo } from "./tipos";
 
-const MARINHO: [number, number, number] = [15, 42, 71];
-const TEAL: [number, number, number] = [31, 149, 152];
-const SUAVE: [number, number, number] = [107, 118, 134];
+const MARINHO: [number, number, number] = [15, 28, 28];
+const TEAL: [number, number, number] = [46, 154, 154];
+const VERDE: [number, number, number] = [125, 172, 91];
+const SUAVE: [number, number, number] = [102, 116, 111];
 const COR_STATUS: Record<Cabo["status"], [number, number, number]> = {
-  T: [46, 155, 72],
+  T: [79, 154, 60],
   P: [212, 138, 18],
   NI: [138, 146, 157],
 };
 
 async function carregarLogo(): Promise<string | null> {
   try {
-    const blob = await (await fetch("/logo.png")).blob();
+    const blob = await (await fetch("/logo-marca.png")).blob();
     return await new Promise((ok) => {
       const r = new FileReader();
       r.onload = () => ok(r.result as string);
@@ -46,8 +47,12 @@ export async function exportarPdf(cabos: Cabo[], filtros: string) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
   doc.text(`Relatório de execução · ${new Date().toLocaleString("pt-BR")}`, logo ? 30 : 10, 18);
-  doc.setFillColor(...TEAL);
-  doc.rect(0, 24, larg, 1.2, "F");
+  // faixa com o degradê da logo (verde → teal)
+  for (let i = 0; i < 40; i++) {
+    const t = i / 39;
+    doc.setFillColor(...(VERDE.map((v, k) => Math.round(v + (TEAL[k] - v) * t)) as [number, number, number]));
+    doc.rect((larg / 40) * i, 24, larg / 40 + 0.2, 1.2, "F");
+  }
 
   let y = 32;
   doc.setTextColor(...SUAVE);
@@ -91,7 +96,7 @@ export async function exportarPdf(cabos: Cabo[], filtros: string) {
       n, g.total, g.T, g.P, g.NI, pct(g.T, g.total), m(g.mEstimados), m(g.mCortados),
     ]),
     theme: "grid",
-    styles: { fontSize: 8, cellPadding: 1.8, lineColor: [217, 222, 229] },
+    styles: { fontSize: 8, cellPadding: 1.8, lineColor: [214, 223, 221] },
     headStyles: { fillColor: TEAL, textColor: 255, fontStyle: "bold" },
     margin: { left: 10, right: 10 },
   });
@@ -117,7 +122,7 @@ export async function exportarPdf(cabos: Cabo[], filtros: string) {
     theme: "striped",
     styles: { fontSize: 7, cellPadding: 1.5, overflow: "linebreak" },
     headStyles: { fillColor: MARINHO, textColor: 255, fontStyle: "bold" },
-    alternateRowStyles: { fillColor: [243, 245, 248] },
+    alternateRowStyles: { fillColor: [243, 246, 245] },
     columnStyles: { 0: { fontStyle: "bold" }, 11: { halign: "center", fontStyle: "bold" } },
     didParseCell: (d) => {
       if (d.section === "body" && d.column.index === 11) {

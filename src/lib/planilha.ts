@@ -256,14 +256,14 @@ export async function exportarExcel(cabos: Cabo[], filtros: string) {
   const cab = ws.getRow(1);
   cab.height = 32;
   cab.eachCell((cell) => {
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F2A47" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F1C1C" } };
     cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
     cell.alignment = { horizontal: "center", vertical: "middle", wrapText: true };
   });
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: ws.columns.length } };
   ws.eachRow((row) =>
     row.eachCell((cell) => {
-      cell.border = { top: { style: "thin", color: { argb: "FFD9DEE5" } }, bottom: { style: "thin", color: { argb: "FFD9DEE5" } }, left: { style: "thin", color: { argb: "FFD9DEE5" } }, right: { style: "thin", color: { argb: "FFD9DEE5" } } };
+      cell.border = { top: { style: "thin", color: { argb: "FFD6DFDD" } }, bottom: { style: "thin", color: { argb: "FFD6DFDD" } }, left: { style: "thin", color: { argb: "FFD6DFDD" } }, right: { style: "thin", color: { argb: "FFD6DFDD" } } };
     }),
   );
 
@@ -279,13 +279,13 @@ export async function exportarExcel(cabos: Cabo[], filtros: string) {
     { header: "", key: "g", width: 16 },
   ];
   rs.getCell("A1").value = "Controle de Cabos — Resumo";
-  rs.getCell("A1").font = { bold: true, size: 14, color: { argb: "FF0F2A47" } };
+  rs.getCell("A1").font = { bold: true, size: 14, color: { argb: "FF0F1C1C" } };
   rs.getCell("A2").value = `Gerado em ${new Date().toLocaleString("pt-BR")}${filtros ? ` · Filtros: ${filtros}` : ""}`;
   rs.getCell("A2").font = { italic: true, color: { argb: "FF6B7686" } };
   const tit = rs.getRow(4);
   tit.values = ["DISCIPLINA", "TOTAL", "T", "P", "NI", "M ESTIMADOS", "M CORTADOS"];
   tit.eachCell((cell) => {
-    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1F9598" } };
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF2E9A9A" } };
     cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
   });
   const grupos = agrupar(cabos, (c) => c.disciplina ?? "(sem disciplina)");

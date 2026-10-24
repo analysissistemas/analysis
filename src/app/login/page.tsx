@@ -31,9 +31,9 @@ export default function Login() {
   }
 
   return (
-    <main className="flex min-h-dvh flex-col bg-marinho">
+    <main className="flex min-h-dvh flex-col bg-grafite">
       <div className="flex flex-1 flex-col items-center justify-center px-6 pt-12 pb-8 text-white">
-        <Image src="/logo.png" alt="" width={96} height={96} priority />
+        <Image src="/logo-marca.png" alt="" width={96} height={96} priority />
         <h1 className="mt-6 text-3xl font-bold">Controle de cabos</h1>
         <p className="mt-1 text-white/70">Consulta e registro em campo</p>
       </div>
@@ -64,7 +64,7 @@ export default function Login() {
           {erro && <p className="rounded-lg bg-erro-fundo px-3 py-2 text-sm text-erro">{erro}</p>}
           <button
             disabled={enviando}
-            className="h-12 w-full rounded-lg bg-teal font-semibold text-white transition hover:bg-teal-escuro disabled:opacity-60"
+            className="gradiente-marca h-12 w-full rounded-lg font-semibold text-white transition hover:brightness-95 disabled:opacity-60"
           >
             {enviando ? "Entrando…" : "Entrar"}
           </button>

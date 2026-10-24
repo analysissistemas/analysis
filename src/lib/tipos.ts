@@ -33,9 +33,9 @@ export type Perfil = {
 };
 
 export const STATUS_INFO: Record<Status, { rotulo: string; cor: string; fundo: string }> = {
-  NI: { rotulo: "Não iniciado", cor: "text-ni", fundo: "bg-ni-fundo" },
-  P: { rotulo: "Parcial", cor: "text-p", fundo: "bg-p-fundo" },
-  T: { rotulo: "Terminado / Executado", cor: "text-t", fundo: "bg-t-fundo" },
+  NI: { rotulo: "Não iniciado", cor: "text-st-ni", fundo: "bg-st-ni-fundo" },
+  P: { rotulo: "Parcial", cor: "text-st-p", fundo: "bg-st-p-fundo" },
+  T: { rotulo: "Terminado / Executado", cor: "text-st-t", fundo: "bg-st-t-fundo" },
 };
 
 // Mesma regra da coluna gerada no banco — usada para mostrar o status antes de sincronizar
