@@ -11,6 +11,8 @@
   --color-teal-claro: #e3f2f0;
   --color-verde: #7dac5b;
   --color-verde-claro: #eef5e8;
+  /* barras de gráfico: teal da marca com saturação validada (contraste ≥ 3:1) */
+  --color-grafico: #13999e;
 
   --color-fundo: #f3f6f5;
   --color-cartao: #ffffff;

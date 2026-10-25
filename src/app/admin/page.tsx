@@ -13,6 +13,15 @@ import { supabase } from "@/lib/supabase";
 import { formatarData, formatarMetros, type Cabo, type Perfil, type Status } from "@/lib/tipos";
 
 type Aba = "painel" | "cabos" | "historico" | "importar" | "usuarios";
+// Rótulo curto e ícone usados na barra inferior do celular
+const ABAS_CELULAR: Record<Aba, { rotulo: string; icone: string }> = {
+  painel: { rotulo: "Geral", icone: "M4 13h6V4H4zM14 20h6v-9h-6zM14 4v4h6V4zM4 20h6v-4H4z" },
+  cabos: { rotulo: "Cabos", icone: "M8 3v4M12 3v4M6 7h8v3a4 4 0 01-8 0V7zM10 14v2a3 3 0 003 3h3a3 3 0 010 6" },
+  historico: { rotulo: "Histórico", icone: "M12 8v4l3 2M3 12a9 9 0 109-9 9 9 0 00-7.5 4M3 4v4h4" },
+  importar: { rotulo: "Importar", icone: "M12 16V4M7 9l5-5 5 5M4 20h16" },
+  usuarios: { rotulo: "Usuários", icone: "M16 19v-1a4 4 0 00-4-4H7a4 4 0 00-4 4v1M9.5 10a3.5 3.5 0 100-7 3.5 3.5 0 000 7zM21 19v-1a4 4 0 00-3-3.9M16 3.1a3.5 3.5 0 010 6.8" },
+};
+
 const ABAS: [Aba, string][] = [
   ["painel", "Visão geral"],
   ["cabos", "Cabos"],
@@ -64,7 +73,7 @@ export default function Admin() {
           </div>
         }
       />
-      <div className="sticky top-[calc(4.5rem+env(safe-area-inset-top))] z-10 border-b border-borda bg-white">
+      <div className="sticky top-[calc(4.5rem+env(safe-area-inset-top))] z-10 hidden border-b border-borda bg-white md:block">
         <div className="mx-auto flex max-w-6xl gap-1 overflow-x-auto px-4">
           {ABAS.map(([a, r]) => (
             <button
@@ -77,7 +86,7 @@ export default function Admin() {
           ))}
         </div>
       </div>
-      <main className={`mx-auto w-full flex-1 px-4 py-6 ${aba === "cabos" ? "max-w-[1800px]" : "max-w-6xl"}`}>
+      <main className={`mx-auto w-full flex-1 px-4 pt-6 pb-28 md:pb-6 ${aba === "cabos" ? "max-w-[1800px]" : "max-w-6xl"}`}>
         {erro && <div className="mb-4"><Aviso tipo="erro">{erro}</Aviso></div>}
         {aba === "painel" && <Painel cabos={cabos} />}
         {aba === "cabos" && <TabelaCabos cabos={cabos} recarregar={recarregar} mostrar={mostrar} />}
@@ -85,6 +94,26 @@ export default function Admin() {
         {aba === "historico" && <Historico cabos={cabos} mostrar={mostrar} recarregar={recarregar} />}
         {aba === "usuarios" && <Usuarios meuId={perfil.id} mostrar={mostrar} />}
       </main>
+      {/* Celular: abas numa barra fixa embaixo, todas visíveis */}
+      <nav aria-label="Seções do painel" className="fixed inset-x-0 bottom-0 z-30 border-t border-borda bg-white pb-[env(safe-area-inset-bottom)] md:hidden">
+        <div className="grid grid-cols-5">
+          {ABAS.map(([a]) => (
+            <button
+              key={a}
+              onClick={() => {
+                setAba(a);
+                window.scrollTo(0, 0);
+              }}
+              aria-current={aba === a ? "page" : undefined}
+              className={`flex flex-col items-center gap-0.5 pt-2 pb-1.5 text-[11px] font-semibold ${aba === a ? "text-teal" : "text-suave"}`}
+            >
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d={ABAS_CELULAR[a].icone} /></svg>
+              {ABAS_CELULAR[a].rotulo}
+              <span className={`mt-0.5 h-1 w-8 rounded-full ${aba === a ? "bg-teal" : "bg-transparent"}`} />
+            </button>
+          ))}
+        </div>
+      </nav>
       <AvisoNoTopo aviso={aviso} fechar={fechar} />
     </div>
   );
@@ -158,7 +187,220 @@ function Painel({ cabos }: { cabos: Cabo[] }) {
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-st-p" /> P · Parcial (cortado, aguardando lançamento)</span>
         <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-full bg-st-ni" /> NI · Não iniciado</span>
       </p>
+
+      <QuemPreencheu />
     </div>
+  );
+}
+
+type PeriodoMetricas = "hoje" | "7" | "30" | "tudo";
+type Preench = {
+  criado_em: string;
+  usuario_id: string | null;
+  cabo_id: number | null;
+  antes: Record<string, unknown> | null;
+  depois: Record<string, unknown> | null;
+  perfis: { nome: string } | null;
+};
+
+const DIAS_GRAFICO = 14;
+
+function inicioDoDia(d: Date) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function chaveDia(d: Date) {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function haQuanto(iso: string) {
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 1) return "agora";
+  if (min < 60) return `há ${min} min`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `há ${h} h`;
+  return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) + " " + hora(iso);
+}
+
+// Dashboard: quem preencheu, quanto e quando (a partir do histórico)
+function QuemPreencheu() {
+  const [periodo, setPeriodo] = useState<PeriodoMetricas>("7");
+  const [dados, setDados] = useState<Preench[] | null>(null);
+  const [erro, setErro] = useState("");
+  const [foco, setFoco] = useState<number | null>(null);
+
+  useEffect(() => {
+    // Busca o maior entre o período escolhido e os 14 dias do gráfico
+    let q = supabase
+      .from("registros")
+      .select("criado_em, usuario_id, cabo_id, antes, depois, perfis(nome)")
+      .eq("acao", "preenchimento")
+      .order("criado_em", { ascending: false })
+      .limit(5000);
+    if (periodo !== "tudo") {
+      const desde = inicioDoDia(new Date());
+      desde.setDate(desde.getDate() - (Math.max(DIAS_GRAFICO, periodo === "30" ? 30 : 0) - 1));
+      q = q.gte("criado_em", desde.toISOString());
+    }
+    let vivo = true;
+    q.then(({ data, error }) => {
+      if (!vivo) return;
+      if (error) setErro(error.message);
+      setDados((data as unknown as Preench[]) ?? []);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [periodo]);
+
+  const inicioPeriodo = (() => {
+    if (periodo === "tudo") return null;
+    const d = inicioDoDia(new Date());
+    if (periodo !== "hoje") d.setDate(d.getDate() - (Number(periodo) - 1));
+    return d.getTime();
+  })();
+  const doPeriodo = (dados ?? []).filter((r) => inicioPeriodo == null || new Date(r.criado_em).getTime() >= inicioPeriodo);
+
+  // Métricas por pessoa
+  type Linha = { nome: string; preench: number; cabos: Set<number>; cortes: number; lancamentos: number; ultimo: string };
+  const porPessoa = new Map<string, Linha>();
+  for (const r of doPeriodo) {
+    const chave = r.usuario_id ?? "removido";
+    const l = porPessoa.get(chave) ?? { nome: r.perfis?.nome ?? "(usuário removido)", preench: 0, cabos: new Set<number>(), cortes: 0, lancamentos: 0, ultimo: r.criado_em };
+    l.preench++;
+    if (r.cabo_id != null) l.cabos.add(r.cabo_id);
+    if (!r.antes?.data_corte && r.depois?.data_corte) l.cortes++;
+    if (!r.antes?.data_lancamento && r.depois?.data_lancamento) l.lancamentos++;
+    if (r.criado_em > l.ultimo) l.ultimo = r.criado_em;
+    porPessoa.set(chave, l);
+  }
+  const ranking = [...porPessoa.values()].sort((a, b) => b.preench - a.preench);
+  const maxPreench = Math.max(1, ...ranking.map((l) => l.preench));
+  const cabosDistintos = new Set(doPeriodo.map((r) => r.cabo_id).filter((x) => x != null)).size;
+  const ultimo = doPeriodo[0];
+
+  // Gráfico: preenchimentos por dia nos últimos 14 dias
+  const dias = Array.from({ length: DIAS_GRAFICO }, (_, i) => {
+    const d = inicioDoDia(new Date());
+    d.setDate(d.getDate() - (DIAS_GRAFICO - 1 - i));
+    return { data: d, total: 0, pessoas: new Map<string, number>() };
+  });
+  const indice = new Map(dias.map((d, i) => [chaveDia(d.data), i]));
+  for (const r of dados ?? []) {
+    const i = indice.get(chaveDia(new Date(r.criado_em)));
+    if (i == null) continue;
+    const nome = r.perfis?.nome ?? "(usuário removido)";
+    dias[i].total++;
+    dias[i].pessoas.set(nome, (dias[i].pessoas.get(nome) ?? 0) + 1);
+  }
+  const maxDia = Math.max(1, ...dias.map((d) => d.total));
+  const diaEmFoco = foco != null ? dias[foco] : null;
+  const fmtDia = (d: Date) => d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+
+  const NOMES_PERIODO: Record<PeriodoMetricas, string> = { hoje: "Hoje", "7": "7 dias", "30": "30 dias", tudo: "Tudo" };
+
+  return (
+    <section className="rounded-xl bg-white p-4 ring-1 ring-borda">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-bold">Quem preencheu</h2>
+        <div role="group" aria-label="Período" className="flex rounded-lg bg-fundo p-1">
+          {(Object.keys(NOMES_PERIODO) as PeriodoMetricas[]).map((p) => (
+            <button
+              key={p}
+              onClick={() => setPeriodo(p)}
+              aria-pressed={periodo === p}
+              className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${periodo === p ? "bg-white text-teal-escuro shadow-sm" : "text-suave hover:text-texto"}`}
+            >
+              {NOMES_PERIODO[p]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {erro && <div className="mt-3"><Aviso tipo="erro">Não foi possível carregar as métricas: {erro}</Aviso></div>}
+
+      {/* Números principais */}
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+        {[
+          ["Preenchimentos", dados == null ? "…" : String(doPeriodo.length)],
+          ["Pessoas ativas", dados == null ? "…" : String(ranking.length)],
+          ["Cabos atualizados", dados == null ? "…" : String(cabosDistintos)],
+          ["Último preenchimento", ultimo ? haQuanto(ultimo.criado_em) : dados == null ? "…" : "—"],
+        ].map(([rot, v], i) => (
+          <div key={rot} className="rounded-xl bg-fundo p-3">
+            <p className="text-sm text-suave">{rot}</p>
+            <p className="mt-1 text-2xl font-bold text-grafite">{v}</p>
+            {i === 3 && ultimo && <p className="truncate text-xs text-suave">{ultimo.perfis?.nome ?? "(usuário removido)"}</p>}
+          </div>
+        ))}
+      </div>
+
+      {/* Ranking por pessoa */}
+      <h3 className="mt-5 text-sm font-bold text-suave uppercase">Por pessoa · {NOMES_PERIODO[periodo].toLowerCase()}</h3>
+      {dados != null && ranking.length === 0 ? (
+        <p className="mt-2 text-sm text-suave">Ninguém preencheu nesse período.</p>
+      ) : (
+        <ul className="mt-2 space-y-3">
+          {ranking.map((l) => (
+            <li key={l.nome}>
+              <div className="flex items-baseline justify-between gap-2 text-sm">
+                <span className="font-semibold">{l.nome}</span>
+                <span className="font-bold text-grafite tabular-nums">{l.preench} preenchimento{l.preench === 1 ? "" : "s"}</span>
+              </div>
+              <div className="mt-1 h-2.5 rounded-full bg-fundo">
+                <div className="h-2.5 rounded-full bg-grafico" style={{ width: `${(l.preench / maxPreench) * 100}%` }} />
+              </div>
+              <p className="mt-1 text-xs text-suave">
+                {l.cabos.size} cabo{l.cabos.size === 1 ? "" : "s"} · {l.cortes} corte{l.cortes === 1 ? "" : "s"} registrado{l.cortes === 1 ? "" : "s"} · {l.lancamentos} lançamento{l.lancamentos === 1 ? "" : "s"} · último {haQuanto(l.ultimo)}
+              </p>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Preenchimentos por dia (14 dias) */}
+      <h3 className="mt-6 text-sm font-bold text-suave uppercase">Preenchimentos por dia · últimos {DIAS_GRAFICO} dias</h3>
+      <div className="relative mt-3" onMouseLeave={() => setFoco(null)}>
+        <div className="flex h-36 items-end gap-0.5 border-b border-borda" role="img" aria-label={`Preenchimentos por dia: ${dias.map((d) => `${fmtDia(d.data)} ${d.total}`).join(", ")}`}>
+          {dias.map((d, i) => (
+            <button
+              key={i}
+              type="button"
+              onMouseEnter={() => setFoco(i)}
+              onFocus={() => setFoco(i)}
+              onClick={() => setFoco(foco === i ? null : i)}
+              aria-label={`${fmtDia(d.data)}: ${d.total} preenchimento(s)`}
+              className="flex h-full flex-1 items-end justify-center"
+            >
+              <span
+                className={`w-full max-w-6 rounded-t ${d.total ? "bg-grafico" : ""} ${foco != null && foco !== i ? "opacity-40" : ""}`}
+                style={{ height: d.total ? `${Math.max(4, (d.total / maxDia) * 100)}%` : 0 }}
+              />
+            </button>
+          ))}
+        </div>
+        <div className="mt-1 flex text-[11px] text-suave">
+          {dias.map((d, i) => (
+            <span key={i} className="flex-1 text-center">{i % 3 === 1 || i === DIAS_GRAFICO - 1 ? fmtDia(d.data) : ""}</span>
+          ))}
+        </div>
+        {diaEmFoco && (
+          <div
+            className="pointer-events-none absolute -top-2 z-10 w-48 -translate-x-1/2 -translate-y-full rounded-lg bg-grafite px-3 py-2 text-xs text-white shadow-lg"
+            style={{ left: `${(Math.min(Math.max(foco!, 1.5), DIAS_GRAFICO - 2.5) + 0.5) * (100 / DIAS_GRAFICO)}%` }}
+          >
+            <p className="font-bold">
+              {diaEmFoco.data.toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" })} · {diaEmFoco.total} preenchimento{diaEmFoco.total === 1 ? "" : "s"}
+            </p>
+            {[...diaEmFoco.pessoas.entries()].sort((a, b) => b[1] - a[1]).map(([nome, n]) => (
+              <p key={nome} className="flex justify-between gap-2 text-white/80"><span className="truncate">{nome}</span><span className="tabular-nums">{n}</span></p>
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -1075,9 +1317,35 @@ function Usuarios({ meuId, mostrar }: { meuId: string; mostrar: Mostrar }) {
         </button>
       </form>
 
-      <section>
+      <section className="max-lg:order-first">
         {msg && <div className="mb-3"><Aviso tipo={msg.tipo}>{msg.texto}</Aviso></div>}
-        <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-borda">
+        {/* Celular: um cartão por usuário */}
+        <ul className="space-y-3 md:hidden">
+          {lista?.map((u) => (
+            <li key={u.id} className="rounded-xl bg-white p-4 ring-1 ring-borda">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold">{u.nome}{u.id === meuId && <span className="ml-1 text-xs text-suave">(você)</span>}</p>
+                  <p className="truncate text-sm text-suave">{u.email}</p>
+                </div>
+                <button disabled={u.id === meuId} onClick={() => alterar(u.id, { ativo: !u.ativo })} className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold ${u.ativo ? "bg-st-t-fundo text-st-t" : "bg-st-ni-fundo text-st-ni"}`}>
+                  {u.ativo ? "Ativo" : "Bloqueado"}
+                </button>
+              </div>
+              <div className="mt-3 flex items-center justify-between gap-2">
+                <label className="flex items-center gap-2 text-sm text-suave">
+                  Acesso
+                  <select value={u.papel} disabled={u.id === meuId} onChange={(e) => alterar(u.id, { papel: e.target.value })} className="h-10 rounded-lg border border-borda bg-white px-2 font-semibold text-texto">
+                    <option value="campo">Campo</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </label>
+                <TrocarSenha aoSalvar={(senha) => alterar(u.id, { senha })} />
+              </div>
+            </li>
+          ))}
+        </ul>
+        <div className="overflow-x-auto rounded-xl bg-white ring-1 ring-borda max-md:bg-transparent max-md:ring-0 max-md:[&>table]:hidden">
           <table className="w-full min-w-[640px] text-sm">
             <thead className="bg-fundo text-left text-xs uppercase text-suave">
               <tr>{["Nome", "E-mail", "Acesso", "Situação", ""].map((h) => <th key={h} className="px-3 py-2.5">{h}</th>)}</tr>
