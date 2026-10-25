@@ -1,5 +1,6 @@
 // Importação e exportação da planilha de cabos (.xlsx)
 import ExcelJS from "exceljs";
+import { ACOES, mudancas, type Registro } from "./historico";
 import type { Cabo } from "./tipos";
 
 export type LinhaImportada = {
@@ -319,8 +320,10 @@ export function agrupar(cabos: Cabo[], chave: (c: Cabo) => string): [string, Res
   return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, resumo(v)]);
 }
 
+// Data local (não UTC): à noite no Brasil o UTC já está no dia seguinte
 export function hoje() {
-  return new Date().toISOString().slice(0, 10);
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
 export function baixar(blob: Blob, nome: string) {
@@ -334,3 +337,47 @@ export function baixar(blob: Blob, nome: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+
+export async function exportarHistoricoExcel(registros: Registro[], filtros: string) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Controle de Cabos";
+  const ws = wb.addWorksheet("HISTÓRICO", { views: [{ state: "frozen", ySplit: 1 }] });
+  ws.columns = [
+    { header: "DATA", key: "data", width: 12, style: { numFmt: "dd/mm/yyyy" } },
+    { header: "HORA", key: "hora", width: 8 },
+    { header: "QUEM", key: "quem", width: 22 },
+    { header: "AÇÃO", key: "acao", width: 18 },
+    { header: "TAG", key: "tag", width: 20 },
+    { header: "DE", key: "de", width: 26 },
+    { header: "PARA", key: "para", width: 26 },
+    { header: "O QUE MUDOU", key: "mudou", width: 60 },
+    { header: "STATUS ANTES", key: "statusAntes", width: 13 },
+    { header: "STATUS DEPOIS", key: "statusDepois", width: 13 },
+  ];
+  for (const r of registros) {
+    const d = new Date(r.criado_em);
+    ws.addRow({
+      data: new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())),
+      hora: d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+      quem: r.perfis?.nome ?? "(usuário removido)",
+      acao: ACOES[r.acao].rotulo,
+      tag: r.tag ?? "",
+      de: r.de ?? "",
+      para: r.para ?? "",
+      mudou: mudancas(r).join("\n"),
+      statusAntes: (r.antes?.status as string) ?? "",
+      statusDepois: (r.depois?.status as string) ?? "",
+    }).getCell("mudou").alignment = { wrapText: true, vertical: "top" };
+  }
+  const cab = ws.getRow(1);
+  cab.height = 24;
+  cab.eachCell((cell) => {
+    cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F1C1C" } };
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 10 };
+    cell.alignment = { vertical: "middle" };
+  });
+  ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: ws.columns.length } };
+  if (filtros) ws.headerFooter.oddHeader = `Histórico — ${filtros}`;
+  const buffer = await wb.xlsx.writeBuffer();
+  baixar(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), `historico-cabos-${hoje()}.xlsx`);
+}

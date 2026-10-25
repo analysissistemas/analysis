@@ -5,16 +5,18 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Aviso, AvisoNoTopo, Cabecalho, Campo, SeloStatus, Selecao, classeInput, useAvisoFlutuante, type TipoAviso } from "@/components/ui";
 import { exportarPdf } from "@/lib/pdf";
-import { agrupar, exportarExcel, lerPlanilha, painelDoDe, resumo, type ResultadoLeitura } from "@/lib/planilha";
+import { ACOES, SELECT_REGISTRO, historicoDoCabo, hora, mudancaStatus, mudancas, rotuloDia, type Acao, type Registro } from "@/lib/historico";
+import { agrupar, exportarExcel, exportarHistoricoExcel, lerPlanilha, painelDoDe, resumo, type ResultadoLeitura } from "@/lib/planilha";
 import { baixarCabos } from "@/lib/offline";
 import { sair, useSessao } from "@/lib/sessao";
 import { supabase } from "@/lib/supabase";
 import { formatarData, formatarMetros, type Cabo, type Perfil, type Status } from "@/lib/tipos";
 
-type Aba = "painel" | "cabos" | "importar" | "usuarios";
+type Aba = "painel" | "cabos" | "historico" | "importar" | "usuarios";
 const ABAS: [Aba, string][] = [
   ["painel", "Visão geral"],
   ["cabos", "Cabos"],
+  ["historico", "Histórico"],
   ["importar", "Importar planilha"],
   ["usuarios", "Usuários"],
 ];
@@ -80,6 +82,7 @@ export default function Admin() {
         {aba === "painel" && <Painel cabos={cabos} />}
         {aba === "cabos" && <TabelaCabos cabos={cabos} recarregar={recarregar} mostrar={mostrar} />}
         {aba === "importar" && <Importar recarregar={recarregar} irParaCabos={() => setAba("cabos")} />}
+        {aba === "historico" && <Historico cabos={cabos} mostrar={mostrar} recarregar={recarregar} />}
         {aba === "usuarios" && <Usuarios meuId={perfil.id} mostrar={mostrar} />}
       </main>
       <AvisoNoTopo aviso={aviso} fechar={fechar} />
@@ -440,6 +443,8 @@ function DetalheCabo({
             </button>
           </section>
 
+          <HistoricoDoCabo caboId={cabo.id} />
+
           {/* Exclusão fica aqui dentro, separada e com confirmação, para não apagar sem querer */}
           <section className="rounded-2xl p-4 ring-1 ring-erro/30">
             {!confirmarExclusao ? (
@@ -607,6 +612,254 @@ function NovoCabo({ fechar, mostrar, aoMudar, sugestoes }: { fechar: () => void;
         </div>
       </aside>
     </div>
+  );
+}
+
+type Periodo = "hoje" | "7" | "30" | "tudo" | "datas";
+
+// Aba Histórico: quem fez o quê, em qual cabo e a que horas
+function Historico({ cabos, mostrar, recarregar }: { cabos: Cabo[]; mostrar: Mostrar; recarregar: () => Promise<void> }) {
+  const [registros, setRegistros] = useState<Registro[] | null>(null);
+  const [pessoas, setPessoas] = useState<{ id: string; nome: string }[]>([]);
+  const [pessoa, setPessoa] = useState("");
+  const [periodo, setPeriodo] = useState<Periodo>("7");
+  const [dataIni, setDataIni] = useState("");
+  const [dataFim, setDataFim] = useState("");
+  const [acao, setAcao] = useState<Acao | "">("");
+  const [busca, setBusca] = useState("");
+  const [exportando, setExportando] = useState(false);
+  const [aberto, setAberto] = useState<Cabo | null>(null);
+  const [versao, setVersao] = useState(0);
+
+  useEffect(() => {
+    supabase
+      .from("perfis")
+      .select("id, nome")
+      .order("nome")
+      .then(({ data }) => setPessoas(data ?? []));
+  }, []);
+
+  useEffect(() => {
+    let q = supabase.from("registros").select(SELECT_REGISTRO).order("criado_em", { ascending: false }).limit(2000);
+    if (pessoa) q = q.eq("usuario_id", pessoa);
+    if (acao) q = q.eq("acao", acao);
+    const inicio = new Date();
+    inicio.setHours(0, 0, 0, 0);
+    if (periodo === "hoje") q = q.gte("criado_em", inicio.toISOString());
+    if (periodo === "7" || periodo === "30") {
+      inicio.setDate(inicio.getDate() - (Number(periodo) - 1));
+      q = q.gte("criado_em", inicio.toISOString());
+    }
+    if (periodo === "datas") {
+      if (dataIni) q = q.gte("criado_em", new Date(`${dataIni}T00:00:00`).toISOString());
+      if (dataFim) q = q.lte("criado_em", new Date(`${dataFim}T23:59:59.999`).toISOString());
+    }
+    let vivo = true;
+    q.then(({ data, error }) => {
+      if (!vivo) return;
+      if (error) mostrar("erro", `Não foi possível carregar o histórico: ${error.message}`);
+      setRegistros((data as unknown as Registro[]) ?? []);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [pessoa, acao, periodo, dataIni, dataFim, versao, mostrar]);
+
+  const termo = busca.trim().toLowerCase();
+  const visiveis = (registros ?? []).filter((r) => !termo || `${r.tag ?? ""} ${r.de ?? ""} ${r.para ?? ""}`.toLowerCase().includes(termo));
+
+  // Resumo por pessoa no período (preenchimentos e cabos que mudaram de status)
+  const porPessoa = new Map<string, { preench: number; outros: number }>();
+  for (const r of visiveis) {
+    const nome = r.perfis?.nome ?? "(usuário removido)";
+    const p = porPessoa.get(nome) ?? { preench: 0, outros: 0 };
+    if (r.acao === "preenchimento") p.preench++;
+    else p.outros++;
+    porPessoa.set(nome, p);
+  }
+
+  const grupos: [string, Registro[]][] = [];
+  for (const r of visiveis) {
+    const dia = rotuloDia(r.criado_em);
+    const g = grupos.at(-1);
+    if (g && g[0] === dia) g[1].push(r);
+    else grupos.push([dia, [r]]);
+  }
+
+  const nomePeriodo = { hoje: "hoje", "7": "últimos 7 dias", "30": "últimos 30 dias", tudo: "todo o período", datas: `${dataIni ? formatarData(dataIni) : "início"} a ${dataFim ? formatarData(dataFim) : "hoje"}` }[periodo];
+  const descricaoFiltros = [nomePeriodo, pessoas.find((p) => p.id === pessoa)?.nome, acao && ACOES[acao].rotulo, termo && `busca "${busca}"`].filter(Boolean).join(" · ");
+
+  async function exportar() {
+    setExportando(true);
+    try {
+      await exportarHistoricoExcel(visiveis, descricaoFiltros);
+      mostrar("ok", `Histórico exportado ✓ — ${visiveis.length} registros. Veja na pasta de downloads.`);
+    } catch {
+      mostrar("erro", "Não foi possível gerar o Excel do histórico.");
+    } finally {
+      setExportando(false);
+    }
+  }
+
+  function abrirCabo(r: Registro) {
+    const c = r.cabo_id != null ? cabos.find((x) => x.id === r.cabo_id) : undefined;
+    if (c) setAberto(c);
+    else mostrar("alerta", `${r.tag ?? "Esse cabo"} foi excluído — só o histórico ficou guardado.`);
+  }
+
+  const sugestoes: Sugestoes = {
+    disciplinas: [...new Set(cabos.map((c) => c.disciplina).filter(Boolean) as string[])].sort(),
+    pavimentos: [...new Set(cabos.map((c) => c.pavimento).filter(Boolean) as string[])].sort(),
+    cabosEstimados: [...new Set(cabos.map((c) => c.cabo_estimado).filter(Boolean) as string[])].sort(),
+  };
+
+  return (
+    <div className="max-w-4xl">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <Campo rotulo="Período">
+          <select value={periodo} onChange={(e) => setPeriodo(e.target.value as Periodo)} className={classeInput}>
+            <option value="hoje">Hoje</option>
+            <option value="7">Últimos 7 dias</option>
+            <option value="30">Últimos 30 dias</option>
+            <option value="tudo">Tudo</option>
+            <option value="datas">Escolher datas…</option>
+          </select>
+        </Campo>
+        <Campo rotulo="Pessoa">
+          <select value={pessoa} onChange={(e) => setPessoa(e.target.value)} className={classeInput}>
+            <option value="">Todas</option>
+            {pessoas.map((p) => <option key={p.id} value={p.id}>{p.nome}</option>)}
+          </select>
+        </Campo>
+        <Campo rotulo="Ação">
+          <select value={acao} onChange={(e) => setAcao(e.target.value as Acao | "")} className={classeInput}>
+            <option value="">Todas</option>
+            {(Object.keys(ACOES) as Acao[]).map((a) => <option key={a} value={a}>{ACOES[a].rotulo}</option>)}
+          </select>
+        </Campo>
+        <Campo rotulo="Buscar"><input value={busca} onChange={(e) => setBusca(e.target.value)} placeholder="TAG, DE ou PARA" className={classeInput} /></Campo>
+      </div>
+      {periodo === "datas" && (
+        <div className="mt-3 grid grid-cols-2 gap-3 md:w-1/2">
+          <Campo rotulo="De"><input type="date" value={dataIni} onChange={(e) => setDataIni(e.target.value)} className={classeInput} /></Campo>
+          <Campo rotulo="Até"><input type="date" value={dataFim} min={dataIni || undefined} onChange={(e) => setDataFim(e.target.value)} className={classeInput} /></Campo>
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <p className="mr-auto flex items-center gap-2 text-sm text-suave">
+          {registros == null ? "Carregando…" : `${visiveis.length} registro(s) · ${nomePeriodo}`}
+          <button onClick={() => { setVersao((v) => v + 1); mostrar("ok", "Histórico atualizado ✓"); }} className="rounded-lg px-2 py-1 font-semibold text-teal hover:bg-teal-claro">
+            ↻ Atualizar
+          </button>
+        </p>
+        <button onClick={exportar} disabled={exportando || !visiveis.length} className="flex h-11 items-center gap-2 rounded-lg bg-white px-4 font-semibold text-st-t ring-1 ring-borda hover:bg-st-t-fundo disabled:opacity-50">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z" /><path d="M8 13l4 5M12 13l-4 5" /></svg>
+          {exportando ? "Gerando…" : "Exportar Excel"}
+        </button>
+      </div>
+
+      {porPessoa.size > 0 && (
+        <section className="mt-4 rounded-xl bg-white p-4 ring-1 ring-borda">
+          <h3 className="text-sm font-bold text-suave uppercase">Por pessoa · {nomePeriodo}</h3>
+          <ul className="mt-2 flex flex-wrap gap-2">
+            {[...porPessoa.entries()].sort((a, b) => b[1].preench - a[1].preench).map(([nome, n]) => (
+              <li key={nome} className="rounded-lg bg-fundo px-3 py-2 text-sm">
+                <b>{nome}</b>: {n.preench} preenchimento(s){n.outros ? ` · ${n.outros} outra(s) ação(ões)` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {registros != null && visiveis.length === 0 && (
+        <p className="mt-4 rounded-xl bg-white p-6 text-center text-suave ring-1 ring-borda">Nenhum registro nesse período e filtros.</p>
+      )}
+
+      {grupos.map(([dia, lista]) => (
+        <section key={dia} className="mt-5">
+          <h3 className="mb-2 text-sm font-bold text-suave first-letter:uppercase">{dia}</h3>
+          <ul className="space-y-2">
+            {lista.map((r) => (
+              <li key={r.id}><ItemHistorico r={r} aoAbrir={r.acao === "importacao" ? undefined : () => abrirCabo(r)} /></li>
+            ))}
+          </ul>
+        </section>
+      ))}
+
+      {aberto && (
+        <DetalheCabo
+          key={aberto.id}
+          cabo={aberto}
+          fechar={() => setAberto(null)}
+          mostrar={mostrar}
+          aoMudar={async () => {
+            await recarregar();
+            setVersao((v) => v + 1);
+          }}
+          sugestoes={sugestoes}
+        />
+      )}
+    </div>
+  );
+}
+
+// Um item do histórico: hora · pessoa · ação, cabo e o que mudou
+function ItemHistorico({ r, aoAbrir, semCabo }: { r: Registro; aoAbrir?: () => void; semCabo?: boolean }) {
+  const st = mudancaStatus(r);
+  return (
+    <div className="rounded-xl bg-white p-3 ring-1 ring-borda">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <span className="font-bold text-grafite tabular-nums">{hora(r.criado_em)}</span>
+        <span className="font-semibold">{r.perfis?.nome ?? "(usuário removido)"}</span>
+        <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${ACOES[r.acao].cor}`}>{ACOES[r.acao].rotulo}</span>
+        {st && (
+          <span className="ml-auto flex items-center gap-1">
+            <SeloStatus status={st.de} curto />
+            <span className="text-suave">→</span>
+            <SeloStatus status={st.para} curto />
+          </span>
+        )}
+      </div>
+      {!semCabo && r.tag && (
+        <button onClick={aoAbrir} disabled={!aoAbrir} className="mt-1.5 block text-left">
+          <span className="font-bold text-teal-escuro underline-offset-2 hover:underline">{r.tag}</span>
+          <span className="block text-xs text-suave">{r.de ?? "—"} → {r.para ?? "—"}</span>
+        </button>
+      )}
+      <ul className="mt-1.5 space-y-0.5 text-sm text-texto">
+        {mudancas(r).map((m) => <li key={m}>{m}</li>)}
+      </ul>
+    </div>
+  );
+}
+
+// Linha do tempo de um cabo (dentro do detalhe)
+function HistoricoDoCabo({ caboId }: { caboId: number }) {
+  const [lista, setLista] = useState<Registro[] | null>(null);
+  useEffect(() => {
+    historicoDoCabo(caboId).then(setLista);
+  }, [caboId]);
+  return (
+    <section className="rounded-2xl p-4 ring-1 ring-borda">
+      <h3 className="font-bold">Histórico deste cabo</h3>
+      {lista == null ? (
+        <p className="mt-2 text-sm text-suave">Carregando…</p>
+      ) : lista.length === 0 ? (
+        <p className="mt-2 text-sm text-suave">Ninguém preencheu este cabo pelo sistema ainda (dados vieram da planilha).</p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {lista.map((r, i) => (
+            <li key={r.id}>
+              {(i === 0 || rotuloDia(lista[i - 1].criado_em) !== rotuloDia(r.criado_em)) && (
+                <p className="mb-1 text-xs font-semibold text-suave first-letter:uppercase">{rotuloDia(r.criado_em)}</p>
+              )}
+              <ItemHistorico r={r} semCabo />
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 
