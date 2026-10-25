@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Aviso, AvisoNoTopo, Cabecalho, Campo, SeloStatus, Selecao, classeInput, useAvisoFlutuante, type TipoAviso } from "@/components/ui";
 import { exportarPdf } from "@/lib/pdf";
-import { agrupar, exportarExcel, lerPlanilha, resumo, type ResultadoLeitura } from "@/lib/planilha";
+import { agrupar, exportarExcel, lerPlanilha, painelDoDe, resumo, type ResultadoLeitura } from "@/lib/planilha";
 import { baixarCabos } from "@/lib/offline";
 import { sair, useSessao } from "@/lib/sessao";
 import { supabase } from "@/lib/supabase";
@@ -168,10 +168,19 @@ function TabelaCabos({ cabos, recarregar, mostrar }: { cabos: Cabo[]; recarregar
   const [busca, setBusca] = useState("");
   const [exportando, setExportando] = useState<"" | "pdf" | "xlsx">("");
   const [aberto, setAberto] = useState<Cabo | null>(null);
+  const [novo, setNovo] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
 
   const disciplinas = useMemo(() => [...new Set(cabos.map((c) => c.disciplina).filter(Boolean) as string[])].sort(), [cabos]);
   const pavimentos = useMemo(() => [...new Set(cabos.map((c) => c.pavimento).filter(Boolean) as string[])].sort(), [cabos]);
+  const sugestoes: Sugestoes = useMemo(
+    () => ({
+      disciplinas,
+      pavimentos,
+      cabosEstimados: [...new Set(cabos.map((c) => c.cabo_estimado).filter(Boolean) as string[])].sort(),
+    }),
+    [cabos, disciplinas, pavimentos],
+  );
 
   const filtrados = cabos.filter(
     (c) =>
@@ -217,6 +226,10 @@ function TabelaCabos({ cabos, recarregar, mostrar }: { cabos: Cabo[]; recarregar
             {atualizando ? "Atualizando…" : "↻ Atualizar"}
           </button>
         </p>
+        <button onClick={() => setNovo(true)} className="gradiente-marca flex h-11 items-center gap-2 rounded-lg px-4 font-semibold text-white shadow-sm hover:brightness-95">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+          Novo cabo
+        </button>
         <button onClick={() => exportar("xlsx")} disabled={!!exportando || !filtrados.length} className="flex h-11 items-center gap-2 rounded-lg bg-white px-4 font-semibold text-st-t ring-1 ring-borda hover:bg-st-t-fundo disabled:opacity-50">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 3H6a2 2 0 00-2 2v14a2 2 0 002 2h12a2 2 0 002-2V9l-6-6z" /><path d="M8 13l4 5M12 13l-4 5" /></svg>
           {exportando === "xlsx" ? "Gerando…" : "Exportar Excel"}
@@ -279,13 +292,27 @@ function TabelaCabos({ cabos, recarregar, mostrar }: { cabos: Cabo[]; recarregar
         {!filtrados.length && <p className="p-6 text-center text-suave">Nenhum cabo encontrado.</p>}
       </div>
 
-      {aberto && <DetalheCabo key={aberto.id} cabo={aberto} fechar={() => setAberto(null)} mostrar={mostrar} aoMudar={recarregar} />}
+      {aberto && <DetalheCabo key={aberto.id} cabo={aberto} fechar={() => setAberto(null)} mostrar={mostrar} aoMudar={recarregar} sugestoes={sugestoes} />}
+      {novo && <NovoCabo fechar={() => setNovo(false)} mostrar={mostrar} aoMudar={recarregar} sugestoes={sugestoes} />}
     </div>
   );
 }
 
 // Detalhe do cabo no admin: dados do cadastro, edição da execução e exclusão (com confirmação)
-function DetalheCabo({ cabo, fechar, mostrar, aoMudar }: { cabo: Cabo; fechar: () => void; mostrar: Mostrar; aoMudar: () => Promise<void> }) {
+function DetalheCabo({
+  cabo,
+  fechar,
+  mostrar,
+  aoMudar,
+  sugestoes,
+}: {
+  cabo: Cabo;
+  fechar: () => void;
+  mostrar: Mostrar;
+  aoMudar: () => Promise<void>;
+  sugestoes: Sugestoes;
+}) {
+  const [editandoCadastro, setEditandoCadastro] = useState(false);
   const [dataCorte, setDataCorte] = useState(cabo.data_corte ?? "");
   const [metragem, setMetragem] = useState(cabo.metragem_cortada?.toString() ?? "");
   const [caboCortado, setCaboCortado] = useState(cabo.cabo_cortado ?? "");
@@ -357,8 +384,29 @@ function DetalheCabo({ cabo, fechar, mostrar, aoMudar }: { cabo: Cabo; fechar: (
         </header>
 
         <div className="flex-1 space-y-4 p-4">
+          {editandoCadastro ? (
+            <FormCadastro
+              inicial={cabo}
+              sugestoes={sugestoes}
+              rotuloSalvar="Salvar cadastro"
+              cancelar={() => setEditandoCadastro(false)}
+              salvar={async (dados) => {
+                const { error } = await supabase.rpc("atualizar_cadastro", { p_cabo_id: cabo.id, p: dados });
+                if (error) return error.message;
+                mostrar("ok", `Cadastro de ${dados.tag} atualizado ✓`);
+                fechar();
+                aoMudar();
+                return null;
+              }}
+            />
+          ) : (
           <section className="rounded-2xl bg-[#e8efed] p-4">
-            <h3 className="font-bold">Dados do cadastro</h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="font-bold">Dados do cadastro</h3>
+              <button onClick={() => setEditandoCadastro(true)} className="rounded-lg px-2 py-1 text-sm font-semibold text-teal hover:bg-white">
+                Editar
+              </button>
+            </div>
             <dl className="mt-2 grid grid-cols-[8rem_1fr] gap-y-1.5 text-sm">
               {[
                 ["DE", cabo.de],
@@ -376,6 +424,7 @@ function DetalheCabo({ cabo, fechar, mostrar, aoMudar }: { cabo: Cabo; fechar: (
               ))}
             </dl>
           </section>
+          )}
 
           <section className="rounded-2xl p-4 ring-1 ring-borda">
             <h3 className="font-bold">Execução</h3>
@@ -411,6 +460,150 @@ function DetalheCabo({ cabo, fechar, mostrar, aoMudar }: { cabo: Cabo; fechar: (
               </>
             )}
           </section>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+type Sugestoes = { disciplinas: string[]; pavimentos: string[]; cabosEstimados: string[] };
+
+type DadosCadastro = {
+  tag: string;
+  de: string;
+  para: string;
+  disciplina: string;
+  pavimento: string;
+  painel: string;
+  cabo_estimado: string;
+  metragem_estimada: string;
+};
+
+// Campos do cadastro de um cabo — usados no "Novo cabo" e no "Editar" do detalhe.
+// salvar devolve uma mensagem de erro, ou null quando deu certo.
+function FormCadastro({
+  inicial,
+  sugestoes,
+  rotuloSalvar,
+  salvar,
+  cancelar,
+  extra,
+}: {
+  inicial?: Partial<Cabo>;
+  sugestoes: Sugestoes;
+  rotuloSalvar: string;
+  salvar: (dados: DadosCadastro) => Promise<string | null>;
+  cancelar: () => void;
+  extra?: React.ReactNode;
+}) {
+  const [d, setD] = useState<DadosCadastro>({
+    tag: inicial?.tag ?? "",
+    de: inicial?.de ?? "",
+    para: inicial?.para ?? "",
+    disciplina: inicial?.disciplina ?? "",
+    pavimento: inicial?.pavimento ?? "",
+    painel: inicial?.painel ?? "",
+    cabo_estimado: inicial?.cabo_estimado ?? "",
+    metragem_estimada: inicial?.metragem_estimada?.toString() ?? "",
+  });
+  const [salvando, setSalvando] = useState(false);
+  const [erro, setErro] = useState("");
+  const muda = (k: keyof DadosCadastro) => (e: React.ChangeEvent<HTMLInputElement>) => setD({ ...d, [k]: e.target.value });
+  const painelSugerido = painelDoDe(d.de.trim() || null);
+
+  async function enviar(e: React.FormEvent) {
+    e.preventDefault();
+    setErro("");
+    if (!d.tag.trim()) return setErro("Informe a TAG do cabo.");
+    const metr = d.metragem_estimada.trim().replace(",", ".");
+    if (metr && (Number.isNaN(Number(metr)) || Number(metr) < 0)) return setErro("Metragem estimada inválida.");
+    setSalvando(true);
+    const msg = await salvar({ ...d, tag: d.tag.trim().toUpperCase(), painel: d.painel.trim() || painelSugerido || "", metragem_estimada: metr });
+    setSalvando(false);
+    if (msg) setErro(msg);
+  }
+
+  return (
+    <form onSubmit={enviar} className="space-y-3 rounded-2xl p-4 ring-1 ring-borda">
+      <datalist id="sug-disciplina">{sugestoes.disciplinas.map((o) => <option key={o} value={o} />)}</datalist>
+      <datalist id="sug-pavimento">{sugestoes.pavimentos.map((o) => <option key={o} value={o} />)}</datalist>
+      <datalist id="sug-cabo">{sugestoes.cabosEstimados.map((o) => <option key={o} value={o} />)}</datalist>
+      <Campo rotulo="TAG do cabo *">
+        <input autoFocus required value={d.tag} onChange={muda("tag")} placeholder="Ex.: 1024-CA-70-HVAC" className={`${classeInput} font-semibold uppercase`} />
+      </Campo>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo rotulo="DE"><input value={d.de} onChange={muda("de")} placeholder="Origem do cabo" className={classeInput} /></Campo>
+        <Campo rotulo="PARA"><input value={d.para} onChange={muda("para")} placeholder="Destino do cabo" className={classeInput} /></Campo>
+        <Campo rotulo="Disciplina"><input list="sug-disciplina" value={d.disciplina} onChange={muda("disciplina")} className={classeInput} /></Campo>
+        <Campo rotulo="Pavimento / Área"><input list="sug-pavimento" value={d.pavimento} onChange={muda("pavimento")} className={classeInput} /></Campo>
+        <Campo rotulo="Cabo estimado"><input list="sug-cabo" value={d.cabo_estimado} onChange={muda("cabo_estimado")} className={classeInput} /></Campo>
+        <Campo rotulo="Metragem estimada (m)">
+          <input inputMode="decimal" value={d.metragem_estimada} onChange={(e) => setD({ ...d, metragem_estimada: e.target.value.replace(/[^\d.,]/g, "") })} className={classeInput} />
+        </Campo>
+      </div>
+      <Campo rotulo="Painel">
+        <input value={d.painel} onChange={muda("painel")} placeholder={painelSugerido ? `${painelSugerido} (pelo DE)` : "Opcional"} className={classeInput} />
+      </Campo>
+      {erro && <Aviso tipo="erro">{erro}</Aviso>}
+      {extra}
+      <div className="grid grid-cols-2 gap-2 pt-1">
+        <button type="button" onClick={cancelar} disabled={salvando} className="h-12 rounded-xl font-semibold ring-1 ring-borda">Cancelar</button>
+        <button disabled={salvando} className="gradiente-marca h-12 rounded-xl font-semibold text-white disabled:opacity-60">
+          {salvando ? "Salvando…" : rotuloSalvar}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// Gaveta lateral para cadastrar um cabo sem planilha
+function NovoCabo({ fechar, mostrar, aoMudar, sugestoes }: { fechar: () => void; mostrar: Mostrar; aoMudar: () => Promise<void>; sugestoes: Sugestoes }) {
+  const [continuar, setContinuar] = useState(false);
+  const [rodada, setRodada] = useState(0);
+
+  useEffect(() => {
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && fechar();
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [fechar]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/40" onClick={fechar}>
+      <aside role="dialog" aria-label="Novo cabo" onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-lg flex-col overflow-y-auto bg-white shadow-2xl">
+        <header className="sticky top-0 z-10 bg-grafite text-white">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <button onClick={fechar} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-full hover:bg-white/10">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M15 18l-6-6 6-6" /></svg>
+            </button>
+            <h2 className="flex-1 text-lg font-bold">Novo cabo</h2>
+          </div>
+          <div className="faixa-marca" />
+        </header>
+        <div className="p-4">
+          <p className="mb-3 text-sm text-suave">
+            O cabo entra como <b>NI · Não iniciado</b> e aparece na hora para o pessoal de campo preencher. Para muitos cabos de uma vez, use “Importar planilha”.
+          </p>
+          <FormCadastro
+            key={rodada}
+            sugestoes={sugestoes}
+            rotuloSalvar="Cadastrar cabo"
+            cancelar={fechar}
+            extra={
+              <label className="flex items-center gap-2 text-sm text-texto">
+                <input type="checkbox" checked={continuar} onChange={(e) => setContinuar(e.target.checked)} className="h-4 w-4 accent-teal" />
+                Cadastrar outro em seguida
+              </label>
+            }
+            salvar={async (dados) => {
+              const { error } = await supabase.rpc("criar_cabo", { p: dados });
+              if (error) return error.message;
+              mostrar("ok", `Cabo ${dados.tag} cadastrado ✓`);
+              aoMudar();
+              if (continuar) setRodada((r) => r + 1);
+              else fechar();
+              return null;
+            }}
+          />
         </div>
       </aside>
     </div>

@@ -27,6 +27,7 @@ npm run dev          # http://localhost:3000
 ## Banco (Supabase)
 
 - `supabase/schema.sql`: tabelas `perfis`, `cabos`, `registros` (histórico), RLS e funções `registrar_execucao`, `importar_cabos`, `excluir_cabo`. Pode ser reaplicado (é idempotente).
+- `supabase/002_cadastro_manual.sql`: `criar_cabo` (botão "Novo cabo" do admin; recusa TAG repetida) e `atualizar_cadastro` ("Editar" no detalhe do cabo).
 - Nenhum usuário escreve direto nas tabelas: toda escrita passa pelas funções, que conferem o papel.
 
 Criar/resetar um usuário pelo terminal:
