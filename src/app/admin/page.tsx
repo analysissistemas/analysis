@@ -1000,13 +1000,20 @@ function Usuarios({ meuId, mostrar }: { meuId: string; mostrar: Mostrar }) {
 
   const chamar = useCallback(async (metodo: string, corpo?: unknown) => {
     const { data } = await supabase.auth.getSession();
-    const res = await fetch("/api/usuarios", {
-      method: metodo,
-      headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}`, "Content-Type": "application/json" },
-      body: corpo ? JSON.stringify(corpo) : undefined,
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.erro ?? "Erro");
+    let res: Response;
+    try {
+      res = await fetch("/api/usuarios", {
+        method: metodo,
+        headers: { Authorization: `Bearer ${data.session?.access_token ?? ""}`, "Content-Type": "application/json" },
+        body: corpo ? JSON.stringify(corpo) : undefined,
+      });
+    } catch {
+      // "Failed to fetch": o navegador nem chegou ao servidor
+      throw new Error("Sem conexão com o servidor. Verifique a internet e se o endereço é solonntech.vercel.app, e tente de novo.");
+    }
+    const json = await res.json().catch(() => ({}));
+    if (res.status === 403) throw new Error("Sua sessão expirou ou você não é admin. Saia e entre de novo.");
+    if (!res.ok) throw new Error(json.erro ?? `Erro do servidor (${res.status}). Tente de novo.`);
     return json;
   }, []);
 
@@ -1098,7 +1105,17 @@ function Usuarios({ meuId, mostrar }: { meuId: string; mostrar: Mostrar }) {
               ))}
             </tbody>
           </table>
-          {lista == null && <p className="p-4 text-suave">Carregando…</p>}
+          {lista == null &&
+            (msg?.tipo === "erro" ? (
+              <div className="p-4 text-center">
+                <p className="text-suave">Não foi possível carregar os usuários.</p>
+                <button onClick={() => { setMsg(null); carregar(); }} className="mt-2 rounded-lg px-3 py-1.5 font-semibold text-teal hover:bg-teal-claro">
+                  ↻ Tentar de novo
+                </button>
+              </div>
+            ) : (
+              <p className="p-4 text-suave">Carregando…</p>
+            ))}
         </div>
       </section>
     </div>
